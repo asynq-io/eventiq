@@ -1,0 +1,39 @@
+.DS_Store
+
+# python
+*.pyc
+dist/
+*.egg-info
+*.egg
+*.egg/
+*.eggs/
+build/
+.cov*
+*.xml
+.tox
+# docker
+.env
+volumes
+
+#virtualenvs
+env/
+venv/
+
+# ide
+.idea/
+vscode/
+.zed/
+
+#pytest
+.pytest_cache/
+__pycache__/
+htmlcov/
+data/
+report.xml
+tmp/
+# mkdocs
+site/
+# mypy
+.mypy_cache
+tmp.db
+.python-version

@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eventiq"
+dynamic = ["version"]
+description = "Publish/Subscribe asyncio framework for Python"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+keywords = []
+authors = [{ name = "RaRhAeu", email = "rarha_eu@protonmail.com" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/asynq-io/eventiq#readme"
+Issues = "https://github.com/asynq-io/eventiq/issues"
+Source = "https://github.com/asynq-io/eventiq"
+
+[tool.hatch.version]
+path = "eventiq/__about__.py"
+
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest",
+    "pyyaml",
+    "pytest-cov",
+    "ruff",
+    "mypy>=1.0.0",
+    "bandit",
+]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+check = [
+    "ruff check ./eventiq",
+    "ruff format --check ./eventiq",
+    "mypy --install-types --non-interactive {args:eventiq tests}",
+    "bandit -r ./eventiq",
+]
+
+[tool.coverage.run]
+source_pkgs = ["eventiq", "tests"]
+branch = true
+parallel = true
+omit = ["eventiq/__about__.py"]
+
+[tool.coverage.paths]
+package = ["eventiq"]
+tests = ["tests"]
+
+[tool.coverage.report]
+exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+
+[tool.pyright]
+venvPath = ".venv"
+venv = "eventiq"
+
+[tool.mypy]
+python_version = "3.9"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+follow_imports = "normal"
+ignore_missing_imports = true
+pretty = true
+show_column_numbers = true
+show_error_codes = true
+warn_no_return = false
+warn_unused_ignores = true
+
+[tool.ruff]
+target-version = "py39"
+
+line-length = 88
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "B008", # do not perform function calls in argument defaults
+    "E501", # line too long
+]
+
+[tool.bandit]
+skips = ['B101']
