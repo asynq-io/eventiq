@@ -30,3 +30,9 @@ repos:
     rev: v1.2.0
     hooks:
       - id: mypy
+        args:
+          [
+            "--install-types",
+            "--non-interactive",
+            "--enable-incomplete-feature=Unpack",
+          ]
