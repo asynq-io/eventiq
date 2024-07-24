@@ -4,13 +4,7 @@ import asyncio
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Generic,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Callable, Generic, Union, overload
 
 from .logging import get_logger
 from .types import CloudEvent, Decoder, Timeout
@@ -113,11 +107,23 @@ class ConsumerGroup:
     def add_consumer_group(self, other: ConsumerGroup) -> None:
         self.consumers.update(other.consumers)
 
+    @overload
+    def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT:
+        ...
+
+    @overload
+    def subscribe(
+        self,
+        func_or_cls: None = None,
+        **options: Any,
+    ) -> Callable[[MessageHandlerT], MessageHandlerT]:
+        ...
+
     def subscribe(
         self,
         func_or_cls: MessageHandlerT | None = None,
         **options: Any,
-    ) -> Callable[[MessageHandlerT], MessageHandlerT] | MessageHandlerT:
+    ) -> MessageHandlerT | Callable[[MessageHandlerT], MessageHandlerT]:
         def decorator(func_or_cls: MessageHandlerT) -> MessageHandlerT:
             cls: type[Consumer] = FnConsumer
             if inspect.isfunction(func_or_cls):

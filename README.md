@@ -11,3 +11,145 @@
 # eventiq
 
 Publish/Subscribe asyncio framework for Python
+
+## Installation
+```shell
+pip install eventiq
+```
+or
+```shell
+poetry add eventiq
+```
+
+### Installing optional dependencies
+
+```shell
+pip install 'eventiq[broker]'
+```
+
+### Available brokers
+
+- `nats`
+- `rabbitmq`
+- `kafka`
+- `redis`
+
+## Features
+
+- Modern, `asyncio` based python 3.8+ syntax
+- Minimal external dependencies
+- Automatic message parsing based on type annotations using `pydantic`
+- Code hot-reload
+- Highly scalable: each service can process hundreds of tasks concurrently,
+    all messages are load balanced between all instances by default
+- Resilient - at least once delivery for all messages by default
+- Customizable & pluggable message encoders (json by default)
+- Multiple broker support
+    - Nats
+    - Kafka
+    - Rabbitmq
+    - Redis
+- Easily extensible via Middlewares
+- Cloud Events standard as base message structure (no more python specific `*args` and `**kwargs` in messages)
+- AsyncAPI documentation generation from code
+- Twelve factor app approach - stdout logging, configuration through environment variables
+- Available extensions for integrating with Prometheus (metrics) and OpenTelemetry (tracing, metrics)
+
+## Basic Usage
+
+```Python
+import asyncio
+from eventiq import Service, Middleware, CloudEvent
+from eventiq.backends.nats import JetStreamBroker
+
+
+broker = JetStreamBroker(url="nats://localhost:4222")
+
+service = Service(name="example-service", broker=broker)
+
+
+class SendMessageMiddleware(Middleware):
+    async def after_service_start(self, broker: JetStreamBroker, service: Service):
+        print(f"After service start, running with {broker}")
+        await asyncio.sleep(10)
+        for i in range(100):
+            await service.publish("test.topic", data={"counter": i})
+        print("Published event(s)")
+
+
+broker.add_middleware(SendMessageMiddleware())
+
+
+@service.subscribe("test.topic")
+async def example_run(message: CloudEvent):
+    print(f"Received Message {message.id} with data: {message.data}")
+```
+
+Run with
+
+```shell
+eventiq run app:service --log-level=info
+```
+
+
+## Watching for changes
+
+```shell
+eventiq run app:service --log-level=info --reload=.
+```
+
+## Testing
+
+`StubBroker` class is provided as in memory replacement for running unit tests
+
+```python
+import os
+
+
+def get_broker(**kwargs):
+    if os.getenv('ENV') == 'TEST':
+        from eventiq.backends.stub import StubBroker
+        return StubBroker()
+    else:
+        from eventiq.backends.rabbitmq import RabbitmqBroker
+        return RabbitmqBroker(**kwargs)
+
+broker = get_broker()
+
+```
+
+Furthermore, subscribers are just regular python coroutines, so it's possible to test them simply by invocation
+
+```python
+
+# main.py
+@service.subscribe(topic="test.topic")
+async def my_subscriber(message: CloudEvent):
+    return 42
+
+# tests.py
+from main import my_subscriber
+
+async def test_my_subscriber():
+    result = await my_subscriber(None)
+    assert result == 42
+
+```
+
+## CLI
+
+Getting help:
+```shell
+eventiq --help
+```
+
+Installing shell autocompletion:
+```shell
+eventiq --install-completion [bash|zsh|fish|powershell|pwsh]
+```
+
+### Basic commands
+
+- `run` - run service
+- `docs` - generate AsyncAPI docs
+- `send` - send message to broker

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from eventiq.exceptions import Fail
 from eventiq.middleware import Middleware
+from eventiq.models import CloudEvent
 
 if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer, Service
@@ -24,4 +25,5 @@ class DeadLetterQueueMiddleware(Middleware):
         exc: Fail,
     ):
         topic = self.topic.format(message=message, consumer=consumer, service=service)
-        await service.send(topic, self.type_, message, **self.kwargs)
+        ce = CloudEvent.new(message, type_=self.type_, topic=topic, **self.kwargs)
+        await service.publish(ce)

@@ -36,8 +36,6 @@ if TYPE_CHECKING:
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     """
-    :param url: Url to nats server(s)
-    :param connection_options: additional connection options passed to nats.connect(...)
     :param auto_flush: auto flush messages on publish
     :param kwargs: options for base class
     """

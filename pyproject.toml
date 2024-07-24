@@ -59,14 +59,17 @@ path = "eventiq/__about__.py"
 dependencies = [
     "pytest",
     "pytest-asyncio",
-    "pyyaml",
+    "pytest-sugar",
     "pytest-cov",
+    "pytest-repeat",
+    "pyyaml",
     "ruff",
     "mypy>=1.0.0",
     "bandit",
     "nats-py",
     "aio-pika",
     "redis",
+    "watchfiles",
 ]
 
 [tool.hatch.envs.default.scripts]

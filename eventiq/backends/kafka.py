@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 class KafkaBroker(UrlBroker[ConsumerRecord, None]):
     """
     Kafka backend
-    :param bootstrap_servers: url or list of kafka servers
-    :param publisher_options: extra options for AIOKafkaProducer
     :param consumer_options: extra options (defaults) for AIOKafkaConsumer
     :param kwargs: Broker base class parameters
     """

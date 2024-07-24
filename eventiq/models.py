@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta
-from typing import Any, Generic, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -14,6 +16,9 @@ from pydantic.fields import FieldInfo
 from pydantic_core.core_schema import ValidationInfo
 
 from .utils import TOPIC_SPECIAL_CHARS, get_topic_regex, utc_now
+
+if TYPE_CHECKING:
+    from .service import Service
 
 D = TypeVar("D", bound=Any)
 
@@ -34,17 +39,18 @@ class CloudEvent(BaseModel, Generic[D]):
         validate_default=True,
     )
     type: str = Field(None, description="Event type", validate_default=True)
-    source: Optional[str] = Field(None, description="Event source (app)")
+    source: str | None = Field(None, description="Event source (app)")
     data: D = Field(..., description="Event payload")
-    dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
+    dataschema: AnyUrl | None = Field(None, description="Data schema URI")
 
-    _raw: Optional[Any] = PrivateAttr(None)
+    _raw: Any | None = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
+    _service: Service | None = PrivateAttr(None)
 
     def __init_subclass__(
         cls,
         abstract: bool = False,
-        topic: Optional[str] = None,
+        topic: str | None = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ):
@@ -92,12 +98,8 @@ class CloudEvent(BaseModel, Generic[D]):
         return str(self)
 
     @classmethod
-    def get_default_topic(cls) -> Optional[str]:
+    def get_default_topic(cls) -> str | None:
         return cls.model_fields["topic"].get_default()
-
-    @classmethod
-    def get_default_content_type(cls) -> Optional[str]:
-        return cls.model_fields["content_type"].get_default()
 
     @field_validator("type", mode="before")
     @classmethod
@@ -116,13 +118,23 @@ class CloudEvent(BaseModel, Generic[D]):
     def raw(self, value: Any) -> None:
         self._raw = value
 
+    @property
+    def service(self) -> Service:
+        if self._service is None:
+            raise ValueError("Service not set")
+        return self._service
+
+    @service.setter
+    def service(self, value: Service) -> None:
+        self._service = value
+
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("by_alias", True)
         kwargs.setdefault("exclude_none", True)
         return super().model_dump(**kwargs)
 
     @classmethod
-    def new(cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any):
+    def new(cls, obj: D, *, headers: dict[str, str] | None = None, **kwargs: Any):
         self = cls(data=obj, **kwargs)
         if headers:
             self._headers.update(headers)

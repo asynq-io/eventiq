@@ -32,7 +32,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     """Base broker class
     :param description: Broker (Server) Description
     :param encoder: Encoder (Serializer) class
-    :param middlewares: Optional list of middlewares
+    :param decoder: Decoder (Deserializer) class
     """
 
     protocol: str

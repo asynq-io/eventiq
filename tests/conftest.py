@@ -83,7 +83,7 @@ def mock_consumer(handler):
 
 @pytest_asyncio.fixture()
 async def running_service(service: Service, mock_consumer) -> AsyncGenerator:
-    service.subscribe(mock_consumer, topic="test_topic")
+    service.subscribe(topic="test_topic")(mock_consumer)
 
     async with service.context():
         yield service

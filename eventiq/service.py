@@ -4,7 +4,7 @@ import asyncio
 import signal
 from asyncio import CancelledError
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
-from typing import Any, Callable, Generic
+from typing import TYPE_CHECKING, Any, Callable, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream
@@ -17,10 +17,12 @@ from .consumer import Consumer, ConsumerGroup
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .middleware import Middleware
-from .models import CloudEvent, Publishes
 from .results import Result, ResultBackend
 from .types import ID, Decoder, Encoder, Message
 from .utils import generate_instance_id, to_float
+
+if TYPE_CHECKING:
+    from .models import CloudEvent, Publishes
 
 Lifespan = Callable[["Service"], AbstractAsyncContextManager[None]]
 
@@ -42,7 +44,6 @@ class Service(Generic[Message], LoggerMixin):
         description: str = "",
         tags_metadata: list[dict[str, Any]] | None = None,
         instance_id_generator: Callable[[], str] = generate_instance_id,
-        base_event_class: type[CloudEvent] = CloudEvent,
         lifespan: Lifespan = nullcontext,
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
@@ -58,10 +59,12 @@ class Service(Generic[Message], LoggerMixin):
         self.id = instance_id_generator()
         self.consumer_group = ConsumerGroup()
         self.middlewares = middlewares or []
-        self.base_event_class = base_event_class
         self.lifespan = lifespan
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
+
+    def add_middleware(self, middleware: Middleware):
+        self.middlewares.append(middleware)
 
     @property
     def subscribe(self):
@@ -74,28 +77,6 @@ class Service(Generic[Message], LoggerMixin):
     @property
     def consumers(self) -> dict[str, Consumer]:
         return self.consumer_group.consumers
-
-    async def send(
-        self,
-        topic: str,
-        type_: type[CloudEvent] | str = "CloudEvent",
-        data: Any | None = None,
-        encoder: Encoder | None = None,
-        **kwargs,
-    ):
-        if isinstance(type_, str):
-            cls = self.base_event_class
-            kwargs["type"] = type_
-        else:
-            cls = type_
-
-        message = cls.new(
-            data,
-            topic=topic,
-            source=self.name,
-            **kwargs,
-        )
-        return await self.publish(message, encoder=encoder)
 
     async def publish(
         self,
@@ -110,6 +91,8 @@ class Service(Generic[Message], LoggerMixin):
         res = await self.broker.publish(message, encoder=encoder, **kwargs)
         await self.dispatch_after("publish", message=message)
         return res
+
+    send = publish
 
     async def connect(self):
         await self.dispatch_before("broker_connect")
@@ -127,11 +110,11 @@ class Service(Generic[Message], LoggerMixin):
             send_stream, receive_stream = create_memory_object_stream[Any](
                 consumer.concurrency * 2
             )
+
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
 
             for i in range(1, consumer.concurrency + 1):
                 self.logger.info(f"Starting {consumer.name}:{i}")
-                # rcv_stream = receive_stream if i == 1 else receive_stream.clone()
                 tg.start_soon(
                     self.receiver,
                     consumer,
@@ -172,7 +155,6 @@ class Service(Generic[Message], LoggerMixin):
 
     async def _dispatch(self, full_event: str, **kwargs) -> None:
         message = kwargs.get("message")
-        exc = None
         for middleware in self.middlewares:
             try:
                 if not message or (
@@ -184,12 +166,6 @@ class Service(Generic[Message], LoggerMixin):
                 self.logger.warning(
                     "Error in middleware  %s", type(middleware), exc_info=e
                 )
-            except Exception as e:
-                exc = e
-                if "exc" in kwargs:
-                    kwargs["exc"] = e
-        if exc:
-            raise exc
 
     async def dispatch_before(self, event: str, **kwargs) -> None:
         await self._dispatch(f"before_{event}", **kwargs)
@@ -209,7 +185,10 @@ class Service(Generic[Message], LoggerMixin):
 
         async with receive_stream:
             async for raw_message in receive_stream:
-                await self._process(consumer, raw_message, decoder, consumer_timeout)
+                with anyio.CancelScope(shield=True):
+                    await self._process(
+                        consumer, raw_message, decoder, consumer_timeout
+                    )
 
     async def ack(self, consumer: Consumer, message: Message) -> None:
         await self.dispatch_before("ack", consumer=consumer, raw_message=message)
@@ -241,12 +220,13 @@ class Service(Generic[Message], LoggerMixin):
         decoder: Decoder,
         timeout: float,
     ):
-        exc: Exception | CancelledError | None = None
+        exc: Exception | None = None
         result = None
         try:
             data = self.broker.get_message_data(raw_message)
             message = decoder.decode(data, consumer.event_type)
             message.raw = raw_message
+            message.service = self
         except (DecodeError, ValidationError) as e:
             self.logger.error(f"Failed to validate message {raw_message}.", exc_info=e)
             if self.broker.should_nack(raw_message):
@@ -256,6 +236,7 @@ class Service(Generic[Message], LoggerMixin):
             else:
                 await self.ack(consumer, raw_message)
             return
+
         try:
             await self.dispatch_before(
                 "process_message", consumer=consumer, message=message
@@ -265,8 +246,7 @@ class Service(Generic[Message], LoggerMixin):
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
-
-        except (CancelledError, Exception) as e:
+        except Exception as e:
             exc = e
         finally:
             await self._handle_message_finalization(consumer, message, result, exc)
@@ -276,15 +256,19 @@ class Service(Generic[Message], LoggerMixin):
         consumer: Consumer,
         message: CloudEvent,
         result: Any,
-        exc: Exception | CancelledError | None,
+        exc: Exception | None,
     ):
-        await self.dispatch_after(
-            "process_message",
-            consumer=consumer,
-            message=message,
-            result=result,
-            exc=exc,
-        )
+        try:
+            await self.dispatch_after(
+                "process_message",
+                consumer=consumer,
+                message=message,
+                result=result,
+                exc=exc,
+            )
+        except Exception as e:
+            exc = e
+
         if exc is None:
             await self.ack(consumer, message.raw)
             return

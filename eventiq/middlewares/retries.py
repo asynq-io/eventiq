@@ -159,18 +159,3 @@ class RetryMiddleware(Middleware):
             "retry_strategy", self.default_retry_strategy
         )
         retry_strategy.maybe_retry(service, message, exc)
-
-    # async def before_publish(self, broker: B, message: CloudEvent, **kwargs) -> None:
-    #     delay = kwargs.get("delay", message.delay)
-
-    #     if delay is not None and self.delay_header:
-    #         message.set_header(self.delay_header, str(delay))
-
-    # async def before_process_message(
-    #     self, broker: B, service: Service, consumer: Consumer, message: CloudEvent
-    # ) -> None:
-    #     """Broker agnostic implementation of not-before header."""
-    #     if self.delay_header:
-    #         delay_header = int(message.headers.get(self.delay_header, 0))
-    #         if delay_header and message.age < timedelta(seconds=delay_header):
-    #             raise Retry(f"Delay header set to {delay_header}", delay=delay_header)

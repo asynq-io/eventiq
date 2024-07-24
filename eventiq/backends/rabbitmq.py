@@ -28,11 +28,9 @@ if TYPE_CHECKING:
 class RabbitmqBroker(UrlBroker[AbstractIncomingMessage, ConfirmationFrameType]):
     """
     RabbitMQ broker implementation, based on `aio_pika` library.
-    :param url: rabbitmq connection string
     :param default_prefetch_count: default number of messages to prefetch (per queue)
     :param queue_options: additional queue options
     :param exchange_name: global exchange name
-    :param connection_options: additional connection options passed to aio_pika.connect_robust
     :param kwargs: Broker base class parameters
     """
 

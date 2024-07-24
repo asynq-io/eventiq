@@ -28,8 +28,6 @@ class RedisBroker(
 ):
     """
     Broker implementation based on redis PUB/SUB and aioredis package
-    :param url: connection string to redis
-    :param connect_options: additional connection options passed to aioredis.from_url
     :param kwargs: base class arguments
     """
 
