@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
 
+from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
-from eventiq.broker import UrlBroker
+from eventiq.broker import UrlBroker, UrlBrokerSettings
 from eventiq.exceptions import BrokerError
 from eventiq.results import Error, Ok, Result, ResultBackend
 from eventiq.types import Encoder
 
 if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer
+
+RedisUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["redis", "rediss"])]
 
 
 class RMessage(TypedDict):
@@ -31,6 +34,7 @@ class RedisBroker(
     :param kwargs: base class arguments
     """
 
+    Settings = UrlBrokerSettings[RedisUrl]
     protocol = "redis"
 
     WILDCARD_ONE = "*"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import aio_pika
 from aio_pika.abc import (
@@ -9,14 +9,17 @@ from aio_pika.abc import (
     AbstractRobustConnection,
 )
 from aiormq.abc import ConfirmationFrameType
+from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
 from eventiq.types import Encoder
 
+RabbitmqUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["amqp"])]
 
-class RabbitMQSettings(UrlBrokerSettings):
+
+class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
     default_prefetch_count: int = 10
     exchange_name: str = "default"
 

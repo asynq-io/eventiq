@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 from itertools import chain
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio.streams.memory import MemoryObjectSendStream
+from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import UrlBroker
 from eventiq.exceptions import BrokerError
@@ -13,8 +14,10 @@ from eventiq.settings import UrlBrokerSettings
 from eventiq.types import Encoder
 from eventiq.utils import utc_now
 
+KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
 
-class KafkaSettings(UrlBrokerSettings):
+
+class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
     consumer_options: dict[str, Any] = {}
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC
 from datetime import timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
@@ -11,6 +11,7 @@ from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
 from nats.js.errors import KeyNotFoundError
 from nats.js.kv import KeyValue
+from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
@@ -19,8 +20,10 @@ from eventiq.settings import UrlBrokerSettings
 from eventiq.types import Encoder
 from eventiq.utils import to_float, utc_now
 
+NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
 
-class NatsSettings(UrlBrokerSettings):
+
+class NatsSettings(UrlBrokerSettings[NatsUrl]):
     auto_flush: bool = True
 
 
