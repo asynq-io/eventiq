@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from asyncio import CancelledError
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, Callable, Generic
 
@@ -271,11 +270,6 @@ class Service(Generic[Message], LoggerMixin):
 
         if exc is None:
             await self.ack(consumer, message.raw)
-            return
-
-        if isinstance(exc, CancelledError):
-            self.logger.info(f"Cancelled message {message.id}")
-            await self.nack(consumer, message.raw)
             return
 
         if isinstance(exc, Retry):

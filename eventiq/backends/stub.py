@@ -107,5 +107,6 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
             await asyncio.sleep(delay)
         await raw_message.queue.put(raw_message)
 
-    def is_connected(self) -> bool:  # type: ignore[override]
+    @property
+    def is_connected(self) -> bool:
         return self._connected

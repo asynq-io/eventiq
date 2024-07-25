@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class Ok(BaseModel):
-    data: Any = None
+    data: Any
 
 
 class Error(BaseModel):

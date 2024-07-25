@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import models_json_schema
-from pydantic_asyncapi.common import Tag
+from pydantic_asyncapi.common import Reference, Tag
 from pydantic_asyncapi.v3 import (
     AsyncAPI,
     Channel,
@@ -22,6 +22,7 @@ from pydantic_asyncapi.v3 import (
     Server,
 )
 
+from eventiq.consumer import Consumer
 from eventiq.models import Publishes
 from eventiq.utils import TOPIC_PATTERN
 
@@ -29,7 +30,7 @@ TOPIC_TRANSLATION = str.maketrans({"{": "", "}": "", ".": "_", "*": "all"})
 PREFIX = "#/components/schemas/"
 
 if TYPE_CHECKING:
-    from eventiq import CloudEvent, Service
+    from eventiq import Broker, CloudEvent, Service
 
 
 def save_async_api_to_file(spec: BaseModel, path: Path, fmt: str) -> None:
@@ -92,44 +93,62 @@ def get_topic_parameters(
     return params
 
 
-def generate_receive_operation(consumer, broker_name, channels_params, spec, tags):
-    event_type = consumer.event_type.__name__
+def generate_receive_operation(
+    consumer: Consumer,
+    broker: Broker,
+    channels_params: dict[str, Any],
+    spec: AsyncAPI,
+    tags: dict[str, Tag],
+):
+    event_type: str = consumer.event_type.__name__
     channel_id = generate_channel_id(consumer.topic)
     params = get_topic_parameters(consumer.topic, **(consumer.parameters or {}))
     for k, v in params.items():
         channels_params[channel_id].setdefault(k, v)
-    message = {
-        "name": event_type,
-        "title": event_type,
-        "description": consumer.event_type.__doc__,
-        "contentType": consumer.event_type.get_default_content_type(),  # This is different per broker
-        "payload": {"$ref": f"#/components/schemas/{event_type}"},
-    }
-    spec["components"]["messages"][event_type] = Message(**message)
+    message = Message(
+        name=event_type,
+        title=event_type,
+        description=consumer.event_type.__doc__,
+        contentType=broker.encoder.CONTENT_TYPE,
+        payload=Reference(ref=f"#/components/schemas/{event_type}"),
+    )
+    if spec.components is None:
+        spec.components = Components()
+    if spec.components.messages is None:
+        spec.components.messages = {}
+    spec.components.messages[event_type] = message
 
-    channel = {
-        "address": consumer.topic,
-        "servers": [{"$ref": f"#/servers/{broker_name}"}],
-        "messages": {
-            event_type: {"$ref": f"#/channels/{channel_id}/messages/{event_type}"}
+    channel = Channel(
+        address=consumer.topic,
+        servers=[Reference(ref=f"#/servers/{broker.name}")],
+        messages={
+            event_type: Reference(ref=f"#/channels/{channel_id}/messages/{event_type}")
         },
-        "parameters": channels_params[channel_id],
-        "tags": get_tag_list(tags, consumer.tags),
-    }
-    spec["channels"][channel_id] = Channel(**channel)
+        parameters=channels_params[channel_id],
+        tags=get_tag_list(tags, consumer.tags),
+    )
+    if spec.channels is None:
+        spec.channels = {}
+    spec.channels[channel_id] = channel
 
     operation_id = f"{to_camel(consumer.name)}Receive"
-    operation = {
-        "action": "receive",
-        "title": f"{snake_case_to_title(consumer.name)} Receive",
-        "summary": consumer.description,
-        "channel": {"$ref": f"#/channels/{channel_id}"},
-    }
-    spec["operations"][operation_id] = Operation(**operation)
+    operation = Operation(
+        action="receive",
+        title=f"{snake_case_to_title(consumer.name)} Receive",
+        summary=consumer.description,
+        channel=Reference(ref=f"#/channels/{channel_id}"),
+    )
+    if spec.operations is None:
+        spec.operations = {}
+    spec.operations[operation_id] = operation
 
 
 def generate_send_operation(
-    publish_list: list[Publishes], broker_name, spec, channels_params, tags
+    publish_list: list[Publishes],
+    broker: Broker,
+    spec: AsyncAPI,
+    channels_params: dict[str, dict[str, Any]],
+    tags,
 ):
     for publishes in publish_list:
         event_type = publishes.type.__name__
@@ -138,47 +157,47 @@ def generate_send_operation(
         for k, v in params.items():
             channels_params[channel_id].setdefault(k, v)
 
-        operation = {
-            "action": "send",
-            "title": f"Send {event_type}",
-            "messages": [{"$ref": f"#/channels/{channel_id}/messages/{event_type}"}],
-            "channel": {"$ref": f"#/channels/{channel_id}"},
-            "tags": get_tag_list(tags, publishes.tags),
-            "summary": publishes.summary,
-        }
         operation_id = f"send{event_type}"
-        spec["operations"][operation_id] = Operation(**operation)
-
-        if channel_id not in spec["channels"]:
-            channel = {
-                "address": publishes.topic,
-                "servers": [{"$ref": f"#/servers/{broker_name}"}],
-                "messages": {
-                    event_type: {"$ref": f"#/components/messages/{event_type}"}
+        operation = Operation(
+            action="send",
+            title=f"Send {event_type}",
+            messages=[Reference(ref=f"#/channels/{channel_id}/messages/{event_type}")],
+            channel=Reference(ref=f"#/channels/{channel_id}"),
+            tags=get_tag_list(tags, publishes.tags),
+            summary=publishes.summary,
+        )
+        if spec.operations is None:
+            spec.operations = {}
+        spec.operations[operation_id] = operation
+        if spec.channels is None:
+            spec.channels = {}
+        if channel_id not in spec.channels:
+            channel = Channel(
+                address=publishes.topic,
+                servers=[Reference(ref=f"#/servers/{broker.name}")],
+                messages={
+                    event_type: Reference(ref=f"#/components/messages/{event_type}")
                 },
-                "parameters": channels_params[channel_id],
-                "tags": get_tag_list(tags, publishes.tags),
-                "summary": publishes.summary,
-            }
-            spec["channels"][channel_id] = Channel(**channel)
+                parameters=channels_params[channel_id],
+                tags=get_tag_list(tags, publishes.tags),
+                summary=publishes.summary,
+            )
+            spec.channels[channel_id] = channel
 
 
-def generate_spec(service: Service) -> dict[str, Any]:
-    spec = {
-        "channels": {},
-        "operations": {},
-        "components": {"messages": {}},
-    }
-    channels_params: dict[str, dict[str, Parameter]] = defaultdict(dict)
+def populate_spec(service: Service, spec: AsyncAPI):
     tags = {t["name"]: Tag.model_validate(t) for t in service.tags_metadata}
-
+    channels_params: dict[str, dict[str, Parameter]] = defaultdict(dict)
     for consumer in service.consumers.values():
         generate_send_operation(
-            consumer.publishes, service.broker.name, spec, channels_params, tags
+            consumer.publishes, service.broker, spec, channels_params, tags
+        )
+        generate_receive_operation(
+            consumer, service.broker, channels_params, spec, tags
         )
 
     generate_send_operation(
-        service.publishes, service.broker.name, spec, channels_params, tags
+        service.publishes, service.broker, spec, channels_params, tags
     )
     return spec
 
@@ -186,27 +205,19 @@ def generate_spec(service: Service) -> dict[str, Any]:
 @functools.lru_cache
 def get_async_api_spec(service: Service) -> AsyncAPI:
     schemas = get_all_models_schema(service)
-    spec = generate_spec(service)
-    components = Components(**{"schemas": schemas, **spec["components"]})
-    return AsyncAPI(
+    spec = AsyncAPI(
         info=Info(
-            **{
-                "title": service.title,
-                "version": service.version,
-                **service.async_api_extra,
-            }
+            title=service.title, version=service.version, **service.async_api_extra
         ),
         servers={
             service.broker.name: Server(
-                title=service.broker.name.title(),
                 protocol=service.broker.protocol,
-                protocolVersion=service.broker.protocol_version,
                 **service.broker.get_info(),
                 **service.broker.async_api_extra,
             )
         },
-        defaultContentType=service.broker.encoder.CONTENT_TYPE,
-        channels=spec["channels"],
-        operations=spec["operations"],
-        components=components,
+        components=Components(schemas=schemas),
     )
+    populate_spec(service, spec)
+
+    return spec
