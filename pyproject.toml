@@ -67,6 +67,7 @@ dependencies = [
     "mypy>=1.0.0",
     "bandit",
     "nats-py",
+    "aiokafka",
     "aio-pika",
     "redis",
     "watchfiles",
