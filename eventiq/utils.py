@@ -92,13 +92,11 @@ def get_topic_regex(topic: str) -> str:
 
 
 @overload
-def to_float(timeout: Timeout) -> float:
-    ...
+def to_float(timeout: Timeout) -> float: ...
 
 
 @overload
-def to_float(timeout: Timeout | None) -> float | None:
-    ...
+def to_float(timeout: Timeout | None) -> float | None: ...
 
 
 def to_float(timeout: Timeout | None) -> float | None:

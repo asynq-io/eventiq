@@ -31,16 +31,13 @@ CloudEvent = TypeVar("CloudEvent", bound="_CloudEvent")
 class Encoder(Protocol):
     CONTENT_TYPE: str
 
-    def encode(self, data: BaseModel) -> bytes:
-        ...
+    def encode(self, data: BaseModel) -> bytes: ...
 
 
 @runtime_checkable
 class Decoder(Protocol[T]):
     @overload
-    def decode(self, data: RawData, as_type: type[T]) -> T:
-        ...
+    def decode(self, data: RawData, as_type: type[T]) -> T: ...
 
     @overload
-    def decode(self, data: RawData, as_type: None = None) -> Any:
-        ...
+    def decode(self, data: RawData, as_type: None = None) -> Any: ...

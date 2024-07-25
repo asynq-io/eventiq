@@ -108,16 +108,14 @@ class ConsumerGroup:
         self.consumers.update(other.consumers)
 
     @overload
-    def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT:
-        ...
+    def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT: ...
 
     @overload
     def subscribe(
         self,
         func_or_cls: None = None,
         **options: Any,
-    ) -> Callable[[MessageHandlerT], MessageHandlerT]:
-        ...
+    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
 
     def subscribe(
         self,

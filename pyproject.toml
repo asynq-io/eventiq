@@ -63,7 +63,7 @@ dependencies = [
     "pytest-cov",
     "pytest-repeat",
     "pyyaml",
-    "ruff",
+    "ruff==0.5.2",
     "mypy>=1.0.0",
     "bandit",
     "nats-py",

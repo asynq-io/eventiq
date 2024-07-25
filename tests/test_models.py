@@ -51,8 +51,7 @@ def test_command_correct_topic(test_command_cls):
 
 
 def test_untyped_model():
-    class UserEvent(CloudEvent):
-        ...
+    class UserEvent(CloudEvent): ...
 
     u1 = UserEvent.new(
         {"name": "John"}, type="UserCreated", topic="events.users.created"
