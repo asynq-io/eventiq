@@ -27,5 +27,8 @@ jobs:
       - name: Install Hatch
         run: pipx install hatch
       - name: Ruff
+        if: matrix.python-version == '3.12'
         run: hatch run default:check
+      - name: Pytest
+        run: hatch run default:test
 
