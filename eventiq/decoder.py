@@ -7,7 +7,7 @@ from pydantic import TypeAdapter
 from .exceptions import DecodeError
 from .types import Decoder, RawData, T
 
-AnyType = TypeAdapter(Any)
+AnyType: TypeAdapter = TypeAdapter(Any)
 
 
 class JsonDecoder:

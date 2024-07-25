@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Annotated, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 from urllib.parse import urlparse
 
 from anyio.streams.memory import MemoryObjectSendStream
-from pydantic import AnyUrl, UrlConstraints
+from pydantic import AnyUrl
 
 from .decoder import DEFAULT_DECODER
 from .encoder import DEFAULT_ENCODER
@@ -38,7 +38,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     protocol: str
     protocol_version: str = ""
 
-    Settings = BrokerSettings
+    Settings: type[BrokerSettings] = BrokerSettings
 
     WILDCARD_ONE: str
     WILDCARD_MANY: str
@@ -157,12 +157,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
 
 class UrlBroker(Broker[Message, R], ABC):
-    settings: UrlBrokerSettings
-
-    def __init_subclass__(cls, **kwargs):
-        UrlType = Annotated[AnyUrl, UrlConstraints(allowed_schemes=[cls.protocol])]
-        cls.Settings = UrlBrokerSettings[UrlType]
-        super().__init_subclass__(**kwargs)
+    settings: type[UrlBrokerSettings]
 
     def __init__(
         self,

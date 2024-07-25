@@ -9,6 +9,7 @@ from aio_pika.abc import (
     AbstractRobustConnection,
 )
 from aiormq.abc import ConfirmationFrameType
+from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import UrlBroker
@@ -54,8 +55,8 @@ class RabbitmqBroker(UrlBroker[AbstractIncomingMessage, ConfirmationFrameType]):
         self.default_prefetch_count = default_prefetch_count
         self.queue_options = queue_options or {}
         self.exchange_name = exchange_name
-        self._connection = None
-        self._exchange = None
+        self._connection: AbstractRobustConnection | None = None
+        self._exchange: AbstractExchange | None = None
 
     @property
     def connection(self) -> AbstractRobustConnection:
@@ -84,7 +85,9 @@ class RabbitmqBroker(UrlBroker[AbstractIncomingMessage, ConfirmationFrameType]):
     async def disconnect(self) -> None:
         await self.connection.close()
 
-    async def sender(self, group: str, consumer: Consumer, send_stream):
+    async def sender(
+        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+    ):
         channel = await self.connection.channel()
         prefetch_count = consumer.concurrency * 2
         await channel.set_qos(prefetch_count=prefetch_count)

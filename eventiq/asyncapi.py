@@ -79,7 +79,7 @@ def generate_channel_id(topic: str) -> str:
 
 
 def get_topic_parameters(
-    topic: str, parameters: dict[str, str] | None = None
+    topic: str, parameters: dict[str, Parameter] | None = None
 ) -> dict[str, Parameter]:
     if parameters is None:
         parameters = {}
@@ -102,9 +102,9 @@ def generate_receive_operation(
 ):
     event_type: str = consumer.event_type.__name__
     channel_id = generate_channel_id(consumer.topic)
-    params = get_topic_parameters(consumer.topic, **(consumer.parameters or {}))
-    for k, v in params.items():
-        channels_params[channel_id].setdefault(k, v)
+    # params = get_topic_parameters(consumer.topic, **(consumer.parameters or {}))
+    # for k, v in params.items():
+    # channels_params[channel_id].setdefault(k, v)
     message = Message(
         name=event_type,
         title=event_type,

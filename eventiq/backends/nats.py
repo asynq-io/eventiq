@@ -176,7 +176,7 @@ class JetStreamBroker(
         self.jetstream_options = jetstream_options or {}
         self.js = JetStreamContext(self.client, **self.jetstream_options)
         self.kv_options = kv_options or {}
-        self._kv = None
+        self._kv: KeyValue | None = None
 
     async def connect(self) -> None:
         await super().connect()
@@ -191,8 +191,7 @@ class JetStreamBroker(
     async def get_result(self, key: str) -> Result | None:
         try:
             data = await self.kv.get(key)
-            if data:
-                assert isinstance(data.value, bytes)
+            if data.value:
                 return self.decoder.decode(data.value, as_type=Result)
             return None
         except KeyNotFoundError:

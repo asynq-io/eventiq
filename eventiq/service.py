@@ -149,8 +149,8 @@ class Service(Generic[Message], LoggerMixin):
                 scope.cancel()
 
     async def get_result(self, message_id: ID) -> Result | None:
-        assert isinstance(self.broker, ResultBackend)
-        return await self.broker.get_result(f"{self.name}:{message_id}")
+        if isinstance(self.broker, ResultBackend):
+            return await self.broker.get_result(f"{self.name}:{message_id}")
 
     async def _dispatch(self, full_event: str, **kwargs) -> None:
         message = kwargs.get("message")

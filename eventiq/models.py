@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -12,10 +10,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic.fields import FieldInfo
+from pydantic.fields import FieldInfo, _FieldInfoInputs
 from pydantic_core.core_schema import ValidationInfo
 
-from .utils import TOPIC_SPECIAL_CHARS, get_topic_regex, utc_now
+from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
 
 if TYPE_CHECKING:
     from .service import Service
@@ -39,24 +37,24 @@ class CloudEvent(BaseModel, Generic[D]):
         validate_default=True,
     )
     type: str = Field(None, description="Event type", validate_default=True)
-    source: str | None = Field(None, description="Event source (app)")
+    source: Optional[str] = Field(None, description="Event source (app)")
     data: D = Field(..., description="Event payload")
-    dataschema: AnyUrl | None = Field(None, description="Data schema URI")
+    dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
 
-    _raw: Any | None = PrivateAttr(None)
+    _raw: Optional[Any] = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
-    _service: Service | None = PrivateAttr(None)
+    _service: Optional["Service"] = PrivateAttr(None)
 
     def __init_subclass__(
         cls,
         abstract: bool = False,
-        topic: str | None = None,
+        topic: Optional[str] = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ):
         if not abstract:
             if topic:
-                kw = {
+                kw: _FieldInfoInputs = {
                     "alias": "subject",
                     "description": "Message subject",
                     "validate_default": True,
@@ -73,7 +71,7 @@ class CloudEvent(BaseModel, Generic[D]):
                 else:
                     kw.update(
                         {
-                            "annotation": Literal[topic],
+                            "annotation": get_annotation(topic),
                             "default": topic,
                         }
                     )
@@ -98,7 +96,7 @@ class CloudEvent(BaseModel, Generic[D]):
         return str(self)
 
     @classmethod
-    def get_default_topic(cls) -> str | None:
+    def get_default_topic(cls) -> Optional[str]:
         return cls.model_fields["topic"].get_default()
 
     @field_validator("type", mode="before")
@@ -119,13 +117,13 @@ class CloudEvent(BaseModel, Generic[D]):
         self._raw = value
 
     @property
-    def service(self) -> Service:
+    def service(self) -> "Service":
         if self._service is None:
             raise ValueError("Service not set")
         return self._service
 
     @service.setter
-    def service(self, value: Service) -> None:
+    def service(self, value: "Service") -> None:
         self._service = value
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
@@ -134,7 +132,7 @@ class CloudEvent(BaseModel, Generic[D]):
         return super().model_dump(**kwargs)
 
     @classmethod
-    def new(cls, obj: D, *, headers: dict[str, str] | None = None, **kwargs: Any):
+    def new(cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any):
         self = cls(data=obj, **kwargs)
         if headers:
             self._headers.update(headers)
@@ -165,7 +163,7 @@ class CloudEvent(BaseModel, Generic[D]):
 class Publishes(BaseModel):
     type: type[CloudEvent]
     topic: str = Field(None)
-    parameters: dict[str, str] = {}
+    parameters: dict[str, Any] = {}
     tags: list[str] = []
     summary: str = ""
 
@@ -173,7 +171,8 @@ class Publishes(BaseModel):
     def validate_topic(self):
         if self.topic is None:
             topic = self.type.get_default_topic()
-            assert topic is not None, "Topic is required"
+            if topic is None:
+                raise ValueError("Topic is required")
             self.topic = topic
         return self
 

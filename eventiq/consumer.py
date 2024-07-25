@@ -31,14 +31,16 @@ class Consumer(ABC, Generic[CloudEvent]):
         decoder: Decoder | None = None,
         description: str | None = None,
         concurrency: int = 1,
-        parameters: dict[str, Any] | None = None,
         publishes: list[Publishes] | None = None,
         **options: Any,
     ):
-        assert event_type is not None, "Event type expected"
+        if event_type is None:
+            raise ValueError("Event type is required")
         topic = topic or event_type.get_default_topic()
-        assert topic, "Topic expected"
-        assert concurrency > 0, "Concurrency must be greater than 0"
+        if not topic:
+            raise ValueError("Topic is required")
+        if concurrency < 1:
+            raise ValueError("Concurrency must be greater than 0")
         self.name = name
         self.event_type = event_type
         self.topic = topic
@@ -47,7 +49,7 @@ class Consumer(ABC, Generic[CloudEvent]):
         self.tags = tags
         self.decoder = decoder
         self.concurrency = concurrency
-        self.parameters = parameters
+        # self.parameters = parameters
         self.description = description
         self.publishes = publishes or []
         self.options: dict[str, Any] = options

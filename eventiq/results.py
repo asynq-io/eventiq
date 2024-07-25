@@ -54,10 +54,11 @@ class ResultBackendMiddleware(Middleware):
             return
         if isinstance(service.broker, ResultBackend):
             if exc is None:
-                value = Ok(data=result)
+                await service.broker.store_result(
+                    f"{service.name}:{message.id}", Ok(data=result)
+                )
             elif service.broker.store_exceptions:
-                value = Error(type=type(exc).__name__, detail=str(exc))
-            else:
-                return
-
-            await service.broker.store_result(f"{service.name}:{message.id}", value)
+                await service.broker.store_result(
+                    f"{service.name}:{message.id}",
+                    Error(type=type(exc).__name__, detail=str(exc)),
+                )

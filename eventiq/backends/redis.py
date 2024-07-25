@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
 
+from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
@@ -63,7 +64,9 @@ class RedisBroker(
             raise BrokerError("Not connected")
         return self._redis
 
-    async def sender(self, group: str, consumer: Consumer, send_stream):
+    async def sender(
+        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+    ):
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
             async with send_stream:

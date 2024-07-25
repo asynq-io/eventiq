@@ -5,7 +5,7 @@ import re
 import socket
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, TypeVar, get_type_hints, overload
+from typing import Any, Callable, Literal, TypeVar, cast, get_type_hints, overload
 from urllib.parse import urlparse
 
 from anyio import to_thread
@@ -106,3 +106,7 @@ def to_float(timeout: Timeout | None) -> float | None:
     if isinstance(timeout, timedelta):
         return timeout.total_seconds()
     return float(timeout)
+
+
+def get_annotation(value: str) -> type:
+    return cast(type, Literal[value])
