@@ -21,6 +21,6 @@ service = Service(
 )
 
 
-@service.subscribe(topic="test.topic")
+@service.subscribe(topic="test.topic", concurrency=10)
 async def example_run(message: CloudEvent):
     print(f"Received Message {message.id} with data: {message.data}")

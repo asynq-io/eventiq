@@ -78,7 +78,7 @@ test = "pytest {args:tests}"
 check = [
     "ruff check ./eventiq",
     "ruff format --check ./eventiq",
-    "mypy --install-types --non-interactive {args:eventiq tests}",
+    "mypy --install-types --non-interactive --enable-incomplete-feature=Unpack {args:eventiq tests}",
     "bandit -r ./eventiq",
 ]
 

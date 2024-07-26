@@ -27,8 +27,11 @@ class Result(RootModel[Union[Ok, Error]]):
 
 
 class ResultBackend(Broker[Message, R], ABC):
-    def __init__(self, store_exceptions: bool = False, **extra):
+    def __init__(
+        self, store_results: bool = False, store_exceptions: bool = False, **extra
+    ):
         super().__init__(**extra)
+        self.store_results = store_results
         self.store_exceptions = store_exceptions
 
     @abstractmethod
@@ -52,7 +55,7 @@ class ResultBackendMiddleware(Middleware):
     ):
         if not consumer.options.get("store_results"):
             return
-        if isinstance(service.broker, ResultBackend):
+        if isinstance(service.broker, ResultBackend) and service.broker.store_results:
             if exc is None:
                 await service.broker.store_result(
                     f"{service.name}:{message.id}", Ok(data=result)

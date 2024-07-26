@@ -111,7 +111,7 @@ class Service(Generic[Message], LoggerMixin):
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
 
             for i in range(1, consumer.concurrency + 1):
-                self.logger.info(f"Starting {consumer.name}:{i}")
+                self.logger.info(f"Starting consumer {consumer.name} task {i}")
                 tg.start_soon(
                     self.receiver,
                     consumer,
@@ -179,7 +179,6 @@ class Service(Generic[Message], LoggerMixin):
             consumer.timeout or self.broker.default_consumer_timeout
         )
         decoder = consumer.decoder or self.broker.decoder
-
         async with receive_stream:
             async for raw_message in receive_stream:
                 with anyio.CancelScope(shield=True):

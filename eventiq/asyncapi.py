@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import models_json_schema
-from pydantic_asyncapi.common import Reference, Schema, Tag
+from pydantic_asyncapi.common import Reference, Tag
 from pydantic_asyncapi.v3 import (
     AsyncAPI,
     Channel,
@@ -206,10 +206,7 @@ def populate_spec(service: Service, spec: AsyncAPI):
 
 @functools.lru_cache
 def get_async_api_spec(service: Service) -> AsyncAPI:
-    schemas_raw = get_all_models_schema(service)
-    schemas = {}
-    for k, v in schemas_raw.items():
-        schemas[k] = Schema.model_validate(v)
+    schemas = get_all_models_schema(service)
     spec = AsyncAPI(
         asyncapi="3.0.0",
         info=Info(
@@ -222,7 +219,7 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
                 **service.broker.async_api_extra,
             )
         },
-        components=Components(schemas=schemas),
+        components=Components.model_validate({"schemas": schemas}),
     )
     populate_spec(service, spec)
 

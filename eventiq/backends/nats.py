@@ -129,6 +129,7 @@ class NatsBroker(AbstractNatsBroker[None]):
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
+            self.logger.info("Sender finished for %s", consumer.name)
 
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
@@ -180,7 +181,8 @@ class JetStreamBroker(
 
     async def connect(self) -> None:
         await super().connect()
-        self._kv = await self.js.create_key_value(**self.kv_options)
+        if self.store_results:
+            self._kv = await self.js.create_key_value(**self.kv_options)
 
     @property
     def kv(self) -> KeyValue:
@@ -253,6 +255,7 @@ class JetStreamBroker(
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
+            self.logger.info("Sender finished for %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         date = raw_message.metadata.timestamp.replace(tzinfo=timezone.utc)
