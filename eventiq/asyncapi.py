@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import models_json_schema
-from pydantic_asyncapi.common import Reference, Tag
+from pydantic_asyncapi.common import Reference, Schema, Tag
 from pydantic_asyncapi.v3 import (
     AsyncAPI,
     Channel,
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 def save_async_api_to_file(spec: BaseModel, path: Path, fmt: str) -> None:
-    data = spec.model_dump(by_alias=True, exclude_none=True)
+    data = spec.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
 
     with open(path, "w") as f:
         if fmt == "yaml":
@@ -102,9 +102,11 @@ def generate_receive_operation(
 ):
     event_type: str = consumer.event_type.__name__
     channel_id = generate_channel_id(consumer.topic)
-    # params = get_topic_parameters(consumer.topic, **(consumer.parameters or {}))
-    # for k, v in params.items():
-    # channels_params[channel_id].setdefault(k, v)
+    params = get_topic_parameters(
+        consumer.topic, consumer.options.get("parameters", {})
+    )
+    for k, v in params.items():
+        channels_params[channel_id].setdefault(k, v)
     message = Message(
         name=event_type,
         title=event_type,
@@ -113,7 +115,7 @@ def generate_receive_operation(
         payload=Reference(ref=f"#/components/schemas/{event_type}"),
     )
     if spec.components is None:
-        spec.components = Components()
+        spec.components = Components(schemas={})
     if spec.components.messages is None:
         spec.components.messages = {}
     spec.components.messages[event_type] = message
@@ -204,8 +206,12 @@ def populate_spec(service: Service, spec: AsyncAPI):
 
 @functools.lru_cache
 def get_async_api_spec(service: Service) -> AsyncAPI:
-    schemas = get_all_models_schema(service)
+    schemas_raw = get_all_models_schema(service)
+    schemas = {}
+    for k, v in schemas_raw.items():
+        schemas[k] = Schema.model_validate(v)
     spec = AsyncAPI(
+        asyncapi="3.0.0",
         info=Info(
             title=service.title, version=service.version, **service.async_api_extra
         ),

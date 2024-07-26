@@ -1,18 +1,15 @@
-from __future__ import annotations
-
 import logging.config
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Optional
 
 import anyio
 import typer
 
 from .imports import import_from_string
 from .logging import get_logger
-
-if TYPE_CHECKING:
-    from .service import Service
+from .models import CloudEvent
+from .service import Service
 
 cli = typer.Typer()
 
@@ -24,10 +21,10 @@ if "." not in sys.path:
 
 def _build_target_from_opts(
     service: str,
-    log_level: str | None,
-    log_config: str | None,
-    use_uvloop: bool | None,
-    debug: bool | None,
+    log_level: Optional[str],
+    log_config: Optional[str],
+    use_uvloop: Optional[bool],
+    debug: Optional[bool],
 ) -> str:
     cmd = [f"eventiq run {service}"]
     if log_level:
@@ -44,16 +41,16 @@ def _build_target_from_opts(
 @cli.command(help="Run service")
 def run(
     service: str,
-    log_level: str | None = typer.Option(
+    log_level: Optional[str] = typer.Option(
         None,
         help="Logger level, accepted values are: debug, info, warning, error, critical",
     ),
-    log_config: str | None = typer.Option(
+    log_config: Optional[str] = typer.Option(
         None, help="Logging file configuration path."
     ),
-    use_uvloop: bool | None = typer.Option(None, help="Enable uvloop"),
+    use_uvloop: Optional[bool] = typer.Option(None, help="Enable uvloop"),
     debug: bool = typer.Option(False, help="Enable debug"),
-    reload: str | None = typer.Option(None, help="Hot-reload on provided path"),
+    reload: Optional[str] = typer.Option(None, help="Hot-reload on provided path"),
 ) -> None:
     if reload:
         try:
@@ -112,15 +109,16 @@ def send(
 ):
     svc: Service = import_from_string(service)
 
-    async def connect_and_send(message_data):
+    async def connect_and_send(message):
         await svc.broker.connect()
         try:
-            await svc.send(topic, type, message_data)
+            await svc.publish(message)
         finally:
             await svc.broker.disconnect()
 
     message_data = svc.broker.decoder.decode(data)
-    anyio.run(connect_and_send, message_data)
+    message = CloudEvent.new(message_data, type=type, topic=topic)
+    anyio.run(connect_and_send, message)
 
 
 @cli.command(help="Generate AsyncAPI documentation from service")

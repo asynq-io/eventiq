@@ -35,7 +35,7 @@ dependencies = [
     "typer",
     "pydantic >2.0,<3",
     "pydantic-settings>2.0,<3",
-    "pydantic-asyncapi==0.2.0",
+    "pydantic-asyncapi==0.2.1",
 ]
 
 [project.urls]

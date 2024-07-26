@@ -67,8 +67,9 @@ class SendMessageMiddleware(Middleware):
         print(f"After service start, running with {service.broker}")
         await asyncio.sleep(10)
         for i in range(100):
-            await service.publish("test.topic", data={"counter": i})
-        print("Published event(s)")
+            message = CloudEvent(topic="test.topic", data={"counter": i})
+            await service.publish(message)
+        print("Published messages(s)")
 
 broker = JetStreamBroker(url="nats://localhost:4222")
 

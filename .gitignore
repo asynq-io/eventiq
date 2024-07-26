@@ -37,3 +37,4 @@ site/
 .mypy_cache
 tmp.db
 .python-version
+asyncapi.yaml
