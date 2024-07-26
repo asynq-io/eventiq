@@ -72,16 +72,11 @@ class SendMessageMiddleware(Middleware):
 
 broker = JetStreamBroker(url="nats://localhost:4222")
 
-service = Service(name="example-service", broker=broker, middlewares=[
-    SendMessageMiddleware()
-]
+service = Service(
+    name="example-service",
+    broker=broker,
+    middlewares=[SendMessageMiddleware()]
 )
-
-
-
-
-
-broker.add_middleware(SendMessageMiddleware())
 
 
 @service.subscribe(topic="test.topic")
