@@ -18,7 +18,7 @@ from .logging import LoggerMixin
 from .middleware import Middleware
 from .results import Result, ResultBackend
 from .types import ID, Decoder, Encoder, Message
-from .utils import generate_instance_id, to_float
+from .utils import to_float
 
 if TYPE_CHECKING:
     from .models import CloudEvent, Publishes
@@ -42,7 +42,6 @@ class Service(Generic[Message], LoggerMixin):
         version: str = "0.1.0",
         description: str = "",
         tags_metadata: list[dict[str, Any]] | None = None,
-        instance_id_generator: Callable[[], str] = generate_instance_id,
         lifespan: Lifespan = nullcontext,
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
@@ -55,7 +54,6 @@ class Service(Generic[Message], LoggerMixin):
         self.version = version
         self.description = description
         self.tags_metadata = tags_metadata or []
-        self.id = instance_id_generator()
         self.consumer_group = ConsumerGroup()
         self.middlewares = middlewares or []
         self.lifespan = lifespan

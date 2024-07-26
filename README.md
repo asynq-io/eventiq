@@ -62,25 +62,29 @@ import asyncio
 from eventiq import Service, Middleware, CloudEvent
 from eventiq.backends.nats import JetStreamBroker
 
-
-broker = JetStreamBroker(url="nats://localhost:4222")
-
-service = Service(name="example-service", broker=broker)
-
-
 class SendMessageMiddleware(Middleware):
-    async def after_service_start(self, broker: JetStreamBroker, service: Service):
-        print(f"After service start, running with {broker}")
+    async def after_broker_connect(self, *, service: Service):
+        print(f"After service start, running with {service.broker}")
         await asyncio.sleep(10)
         for i in range(100):
             await service.publish("test.topic", data={"counter": i})
         print("Published event(s)")
 
+broker = JetStreamBroker(url="nats://localhost:4222")
+
+service = Service(name="example-service", broker=broker, middlewares=[
+    SendMessageMiddleware()
+]
+)
+
+
+
+
 
 broker.add_middleware(SendMessageMiddleware())
 
 
-@service.subscribe("test.topic")
+@service.subscribe(topic="test.topic")
 async def example_run(message: CloudEvent):
     print(f"Received Message {message.id} with data: {message.data}")
 ```

@@ -4,19 +4,19 @@ import asyncio
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Callable
 
-from eventiq.middleware import Middleware
+from eventiq.middleware import CloudEventType, Middleware
 from eventiq.utils import to_async
 
 if TYPE_CHECKING:
-    from eventiq import CloudEvent, Consumer, Service
+    from eventiq import Consumer, Service
 
 
-class ErrorHandlerMiddleware(Middleware):
+class ErrorHandlerMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
         errors: type[Exception] | tuple[type[Exception]],
         callback: Callable[
-            [Service, Consumer, CloudEvent, Exception | None], Awaitable[Any]
+            [Service, Consumer, CloudEventType, Exception | None], Awaitable[Any]
         ],
     ):
         if not asyncio.iscoroutinefunction(callback):
@@ -29,7 +29,7 @@ class ErrorHandlerMiddleware(Middleware):
         *,
         service: Service,
         consumer: Consumer,
-        message: CloudEvent,
+        message: CloudEventType,
         result: Any | None = None,
         exc: Exception | None = None,
     ):

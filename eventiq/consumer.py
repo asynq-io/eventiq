@@ -7,23 +7,23 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Callable, Generic, Union, overload
 
 from .logging import get_logger
-from .types import CloudEvent, Decoder, Timeout
+from .types import CloudEventType, Decoder, Timeout
 from .utils import resolve_message_type_hint, to_async
 
 if TYPE_CHECKING:
     from .models import Publishes
 
-Fn = Callable[[CloudEvent], Awaitable[Any]]
+Fn = Callable[[CloudEventType], Awaitable[Any]]
 
 
-class Consumer(ABC, Generic[CloudEvent]):
+class Consumer(ABC, Generic[CloudEventType]):
     """Base consumer class"""
 
     def __init__(
         self,
         *,
         name: str,
-        event_type: type[CloudEvent],
+        event_type: type[CloudEventType],
         topic: str | None = None,
         timeout: Timeout | None = None,
         dynamic: bool = False,
@@ -56,11 +56,11 @@ class Consumer(ABC, Generic[CloudEvent]):
         self.logger = get_logger(__name__, self.name)
 
     @abstractmethod
-    async def process(self, message: CloudEvent) -> Any:
+    async def process(self, message: CloudEventType) -> Any:
         raise NotImplementedError
 
 
-class FnConsumer(Consumer[CloudEvent]):
+class FnConsumer(Consumer[CloudEventType]):
     def __init__(
         self,
         *,
@@ -78,11 +78,11 @@ class FnConsumer(Consumer[CloudEvent]):
         self.fn = fn
         super().__init__(**extra)
 
-    async def process(self, message: CloudEvent) -> Any:
+    async def process(self, message: CloudEventType) -> Any:
         return await self.fn(message)
 
 
-class GenericConsumer(Consumer[CloudEvent], ABC):
+class GenericConsumer(Consumer[CloudEventType], ABC):
     def __init__(self, **extra: Any) -> None:
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)

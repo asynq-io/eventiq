@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Generic
 from .consumer import Consumer
 from .exceptions import Fail, Retry, Skip
 from .logging import LoggerMixin
-from .types import CloudEvent
+from .types import CloudEventType
 
 if TYPE_CHECKING:
     from .service import Service
@@ -15,11 +15,11 @@ class _Sentinel(Exception):
     pass
 
 
-class Middleware(Generic[CloudEvent], LoggerMixin):
+class Middleware(Generic[CloudEventType], LoggerMixin):
     """Base class for middlewares"""
 
     throws: type[Exception] | tuple[type[Exception], ...] = _Sentinel
-    requires: type[CloudEvent] | None = None
+    requires: type[CloudEventType] | None = None
 
     async def before_broker_connect(self, *, service: Service) -> None:
         """Called before broker connects"""
@@ -72,32 +72,47 @@ class Middleware(Generic[CloudEvent], LoggerMixin):
         """Called after message is rejected"""
 
     async def before_publish(
-        self, *, service: Service, message: CloudEvent, **kwargs: Any
+        self, *, service: Service, message: CloudEventType, **kwargs: Any
     ) -> None:
         """Called before message is published"""
 
     async def after_publish(
-        self, *, service: Service, message: CloudEvent, **kwargs: Any
+        self, *, service: Service, message: CloudEventType, **kwargs: Any
     ) -> None:
         """Called after message is published"""
 
     async def after_skip_message(
-        self, *, service: Service, consumer: Consumer, message: CloudEvent, exc: Skip
+        self,
+        *,
+        service: Service,
+        consumer: Consumer,
+        message: CloudEventType,
+        exc: Skip,
     ) -> None:
         """Called after message is skipped by the middleware"""
 
     async def after_fail_message(
-        self, *, service: Service, consumer: Consumer, message: CloudEvent, exc: Fail
+        self,
+        *,
+        service: Service,
+        consumer: Consumer,
+        message: CloudEventType,
+        exc: Fail,
     ):
         """Called after message is failed by the middleware"""
 
     async def after_retry_message(
-        self, *, service: Service, consumer: Consumer, message: CloudEvent, exc: Retry
+        self,
+        *,
+        service: Service,
+        consumer: Consumer,
+        message: CloudEventType,
+        exc: Retry,
     ) -> None:
         """Called after message is retried by the middleware"""
 
     async def before_process_message(
-        self, *, service: Service, consumer: Consumer, message: CloudEvent
+        self, *, service: Service, consumer: Consumer, message: CloudEventType
     ) -> None:
         """Called before message is processed"""
 
@@ -106,7 +121,7 @@ class Middleware(Generic[CloudEvent], LoggerMixin):
         *,
         service: Service,
         consumer: Consumer,
-        message: CloudEvent,
+        message: CloudEventType,
         result: Any = None,
         exc: Exception | None = None,
     ) -> None:

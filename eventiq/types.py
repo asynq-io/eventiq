@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from .models import CloudEvent as _CloudEvent
+    from .models import CloudEvent
 
 ID = Union[UUID, str]
 
@@ -24,7 +24,7 @@ Seconds = Union[int, float]
 Timeout = Union[Seconds, timedelta]
 RawData = Union[str, bytes, bytearray]
 
-CloudEvent = TypeVar("CloudEvent", bound="_CloudEvent")
+CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 
 
 @runtime_checkable

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import functools
 import re
-import socket
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Literal, TypeVar, cast, get_type_hints, overload
@@ -22,10 +21,6 @@ TOPIC_SPECIAL_CHARS = {"{", "}", "*", ">"}
 
 def utc_now():
     return datetime.now(tz=timezone.utc)
-
-
-def generate_instance_id() -> str:
-    return socket.gethostname()
 
 
 def to_async(func: Callable[P, R]) -> Callable[P, Awaitable[R]]:

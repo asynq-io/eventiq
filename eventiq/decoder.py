@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, overload
+from typing import Any
 
 from pydantic import TypeAdapter
 
@@ -14,12 +14,6 @@ class JsonDecoder:
     def __init__(self, strict: bool = False, context: Any = None):
         self.strict = strict
         self.context = context
-
-    @overload
-    def decode(self, data: RawData, as_type: type[T]) -> T: ...
-
-    @overload
-    def decode(self, data: RawData, as_type: None = None) -> Any: ...
 
     def decode(self, data: RawData, as_type: type[T] | None = None) -> T | Any:
         try:

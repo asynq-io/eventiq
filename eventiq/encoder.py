@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel
 from pydantic.main import IncEx
 from typing_extensions import Unpack
 
 from .exceptions import EncodeError
-from .types import Encoder, T
+from .types import Encoder
 
 
 class Options(TypedDict, total=False):
@@ -24,7 +24,7 @@ class Options(TypedDict, total=False):
     serialize_as_any: bool
 
 
-class JsonEncoder(Generic[T]):
+class JsonEncoder:
     CONTENT_TYPE: str = "application/json"
 
     def __init__(self, **options: Unpack[Options]) -> None:
