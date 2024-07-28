@@ -23,13 +23,13 @@ class HealthCheckMiddleware(Middleware):
         self,
         interval: int = 5,
         predicates: list[Callable[..., Awaitable[Any]]] | None = None,
-    ):
+    ) -> None:
         super().__init__()
         self.interval = interval
         self.predicates = predicates or []
         self._task: asyncio.Task | None = None
 
-    async def after_broker_connect(self, *, service: Service):
+    async def after_broker_connect(self, *, service: Service) -> None:
         self._task = asyncio.create_task(self._run_forever(service.broker))
 
     async def _run_forever(self, broker) -> None:

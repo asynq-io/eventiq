@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import re
 from abc import ABC, abstractmethod
@@ -42,6 +43,13 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
     WILDCARD_ONE: str
     WILDCARD_MANY: str
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        if not inspect.isabstract(cls):
+            protocol = getattr(cls, "protocol", None)
+            if protocol is None:
+                raise ValueError(f"Broker subclass {cls} must define a protocol")
 
     def __init__(
         self,
@@ -124,7 +132,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     @abstractmethod
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
-    ) -> R | None:
+    ) -> R:
         raise NotImplementedError
 
     @abstractmethod

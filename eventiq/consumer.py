@@ -4,10 +4,20 @@ import asyncio
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Callable, Generic, Union, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    TypedDict,
+    Union,
+    overload,
+)
+
+from typing_extensions import Unpack
 
 from .logging import get_logger
-from .types import CloudEventType, Decoder, Timeout
+from .types import CloudEventType, Decoder, Parameter, Timeout
 from .utils import resolve_message_type_hint, to_async
 
 if TYPE_CHECKING:
@@ -32,8 +42,10 @@ class Consumer(ABC, Generic[CloudEventType]):
         description: str | None = None,
         concurrency: int = 1,
         publishes: list[Publishes] | None = None,
+        parameters: dict[str, Parameter] | None = None,
+        asyncapi_extra: dict[str, Any] | None = None,
         **options: Any,
-    ):
+    ) -> None:
         if event_type is None:
             raise ValueError("Event type is required")
         topic = topic or event_type.get_default_topic()
@@ -49,9 +61,10 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.tags = tags
         self.decoder = decoder
         self.concurrency = concurrency
-        # self.parameters = parameters
+        self.parameters = parameters or {}
         self.description = description
         self.publishes = publishes or []
+        self.asyncapi_extra = asyncapi_extra or {}
         self.options: dict[str, Any] = options
         self.logger = get_logger(__name__, self.name)
 
@@ -86,7 +99,6 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
     def __init__(self, **extra: Any) -> None:
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)
-
         if "event_type" not in extra:
             extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore
         if "description" not in extra:
@@ -98,8 +110,25 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
 MessageHandlerT = Union[type[GenericConsumer], Fn]
 
 
+class ConsumerGroupOptions(TypedDict, total=False):
+    topic: str
+    timeout: Timeout
+    dynamic: bool
+    tags: list[str]
+    decoder: Decoder
+    description: str
+    concurrency: int
+    publishes: list[Publishes]
+    parameters: dict[str, Parameter]
+    asyncapi_extra: dict[str, Any]
+
+
+class ConsumerOptions(ConsumerGroupOptions, total=False):
+    name: str
+
+
 class ConsumerGroup:
-    def __init__(self, **options: Any):
+    def __init__(self, **options: Unpack[ConsumerGroupOptions]) -> None:
         self.consumers: dict[str, Consumer] = {}
         self.options = options
 
@@ -111,6 +140,13 @@ class ConsumerGroup:
 
     @overload
     def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT: ...
+
+    @overload
+    def subscribe(
+        self,
+        func_or_cls: None = None,
+        **options: Unpack[ConsumerOptions],
+    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
 
     @overload
     def subscribe(

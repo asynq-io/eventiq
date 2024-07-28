@@ -18,7 +18,7 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         callback: Callable[
             [Service, Consumer, CloudEventType, Exception | None], Awaitable[Any]
         ],
-    ):
+    ) -> None:
         if not asyncio.iscoroutinefunction(callback):
             callback = to_async(callback)
         self.callback = callback
@@ -32,6 +32,6 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         message: CloudEventType,
         result: Any | None = None,
         exc: Exception | None = None,
-    ):
+    ) -> None:
         if exc and isinstance(exc, self.exc):
             await self.callback(service, consumer, message, exc)

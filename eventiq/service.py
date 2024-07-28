@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import signal
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
-from typing import TYPE_CHECKING, Any, Callable, Generic
+from typing import Any, Callable, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream
@@ -16,12 +16,10 @@ from .consumer import Consumer, ConsumerGroup
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .middleware import Middleware
+from .models import CloudEvent, Publishes
 from .results import Result, ResultBackend
 from .types import ID, Decoder, Encoder, Message
 from .utils import to_float
-
-if TYPE_CHECKING:
-    from .models import CloudEvent, Publishes
 
 Lifespan = Callable[["Service"], AbstractAsyncContextManager[None]]
 
@@ -31,7 +29,7 @@ async def nullcontext(service: Service):
     yield
 
 
-class Service(Generic[Message], LoggerMixin):
+class Service(Generic[Message, R], LoggerMixin):
     """Logical group of consumers. Provides group (queue) name and handles versioning"""
 
     def __init__(
@@ -41,11 +39,11 @@ class Service(Generic[Message], LoggerMixin):
         title: str | None = None,
         version: str = "0.1.0",
         description: str = "",
-        tags_metadata: list[dict[str, Any]] | None = None,
+        middlewares: list[Middleware] | None = None,
         lifespan: Lifespan = nullcontext,
+        tags_metadata: list[dict[str, Any]] | None = None,
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
-        middlewares: list[Middleware] | None = None,
         **options,
     ):
         self.broker = broker
@@ -59,9 +57,10 @@ class Service(Generic[Message], LoggerMixin):
         self.lifespan = lifespan
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
+        self.options = options
 
-    def add_middleware(self, middleware: Middleware):
-        self.middlewares.append(middleware)
+    def add_middleware(self, middleware: type[Middleware], *args, **kwargs) -> None:
+        self.middlewares.append(middleware(*args, **kwargs))
 
     @property
     def subscribe(self):
@@ -75,12 +74,28 @@ class Service(Generic[Message], LoggerMixin):
     def consumers(self) -> dict[str, Consumer]:
         return self.consumer_group.consumers
 
+    async def send(
+        self,
+        data: Any,
+        type: type[CloudEvent] | str = CloudEvent,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs,
+    ) -> R:
+        if isinstance(type, str):
+            kwargs["type"] = type
+            type = CloudEvent
+        ce = type.new(data, type=type, source=self.name, headers=headers, **kwargs)
+        if headers:
+            ce.headers.update(headers)
+        return await self.publish(ce)
+
     async def publish(
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
         **kwargs,
-    ) -> Any:
+    ) -> R:
         if not message.source:
             message.source = self.name
 
@@ -88,8 +103,6 @@ class Service(Generic[Message], LoggerMixin):
         res = await self.broker.publish(message, encoder=encoder, **kwargs)
         await self.dispatch_after("publish", message=message)
         return res
-
-    send = publish
 
     async def connect(self):
         await self.dispatch_before("broker_connect")

@@ -24,6 +24,7 @@ from pydantic_asyncapi.v3 import (
 
 from eventiq.consumer import Consumer
 from eventiq.models import Publishes
+from eventiq.types import Parameter as ParamDict
 from eventiq.utils import TOPIC_PATTERN
 
 TOPIC_TRANSLATION = str.maketrans({"{": "", "}": "", ".": "_", "*": "all"})
@@ -79,18 +80,15 @@ def generate_channel_id(topic: str) -> str:
 
 
 def get_topic_parameters(
-    topic: str, parameters: dict[str, Parameter] | None = None
+    topic: str, parameters: dict[str, ParamDict]
 ) -> dict[str, Parameter]:
-    if parameters is None:
-        parameters = {}
-    params = {}
+    result_params = {}
     for k in topic.split("."):
         if TOPIC_PATTERN.fullmatch(k):
             param_name = k[1:-1]
-            params[param_name] = parameters.get(
-                param_name, Parameter(description=param_name)
-            )
-    return params
+            param = parameters.get(param_name, {"description": param_name})
+            result_params[param_name] = Parameter(**param)
+    return result_params
 
 
 def generate_receive_operation(
@@ -102,9 +100,7 @@ def generate_receive_operation(
 ):
     event_type: str = consumer.event_type.__name__
     channel_id = generate_channel_id(consumer.topic)
-    params = get_topic_parameters(
-        consumer.topic, consumer.options.get("parameters", {})
-    )
+    params = get_topic_parameters(consumer.topic, consumer.parameters)
     for k, v in params.items():
         channels_params[channel_id].setdefault(k, v)
     message = Message(
@@ -113,9 +109,10 @@ def generate_receive_operation(
         description=consumer.event_type.__doc__,
         contentType=broker.encoder.CONTENT_TYPE,
         payload=Reference(ref=f"#/components/schemas/{event_type}"),
+        **consumer.asyncapi_extra.get("message", {}),
     )
     if spec.components is None:
-        spec.components = Components(schemas={})
+        spec.components = Components()
     if spec.components.messages is None:
         spec.components.messages = {}
     spec.components.messages[event_type] = message
@@ -128,6 +125,7 @@ def generate_receive_operation(
         },
         parameters=channels_params[channel_id],
         tags=get_tag_list(tags, consumer.tags),
+        **consumer.asyncapi_extra.get("channel", {}),
     )
     if spec.channels is None:
         spec.channels = {}
@@ -139,6 +137,7 @@ def generate_receive_operation(
         title=f"{snake_case_to_title(consumer.name)} Receive",
         summary=consumer.description,
         channel=Reference(ref=f"#/channels/{channel_id}"),
+        **consumer.asyncapi_extra.get("operation", {}),
     )
     if spec.operations is None:
         spec.operations = {}
@@ -167,6 +166,7 @@ def generate_send_operation(
             channel=Reference(ref=f"#/channels/{channel_id}"),
             tags=get_tag_list(tags, publishes.tags),
             summary=publishes.summary,
+            **publishes.asyncapi_extra.get("operation", {}),
         )
         if spec.operations is None:
             spec.operations = {}
@@ -183,6 +183,7 @@ def generate_send_operation(
                 parameters=channels_params[channel_id],
                 tags=get_tag_list(tags, publishes.tags),
                 summary=publishes.summary,
+                **publishes.asyncapi_extra.get("channel", {}),
             )
             spec.channels[channel_id] = channel
 
@@ -219,7 +220,7 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
                 **service.broker.async_api_extra,
             )
         },
-        components=Components.model_validate({"schemas": schemas}),
+        components=Components(schemas=schemas),
     )
     populate_spec(service, spec)
 

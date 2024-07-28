@@ -13,6 +13,7 @@ from pydantic import (
 from pydantic.fields import FieldInfo, _FieldInfoInputs
 from pydantic_core.core_schema import ValidationInfo
 
+from .types import Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
 
 if TYPE_CHECKING:
@@ -163,9 +164,10 @@ class CloudEvent(BaseModel, Generic[D]):
 class Publishes(BaseModel):
     type: type[CloudEvent]
     topic: str = Field(None)
-    parameters: dict[str, Any] = {}
+    parameters: dict[str, Parameter] = {}
     tags: list[str] = []
     summary: str = ""
+    asyncapi_extra: dict[str, Any] = {}
 
     @model_validator(mode="after")
     def validate_topic(self):

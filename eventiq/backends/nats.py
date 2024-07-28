@@ -5,6 +5,7 @@ from abc import ABC
 from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any
 
+from anyio.streams.memory import MemoryObjectSendStream
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
 from nats.js import JetStreamContext, api
@@ -28,9 +29,10 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 
 class JetStreamSettings(NatsSettings):
-    prefetch_count: int = 10
+    prefetch_count: int | None = None
     fetch_timeout: int = 10
     jetstream_options: dict[str, Any] = {}
+    kv_options: dict[str, Any] = {}
 
 
 if TYPE_CHECKING:
@@ -114,9 +116,14 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     def get_message_data(raw_message: NatsMsg) -> bytes:
         return raw_message.data
 
+    def get_asyncapi_bindings(self, event_type: type[CloudEvent]) -> dict[str, Any]:
+        return {"queue": event_type.get_default_topic(), "bindingVersion": "0.1.0"}
+
 
 class NatsBroker(AbstractNatsBroker[None]):
-    async def sender(self, group: str, consumer: Consumer, send_stream):
+    async def sender(
+        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+    ):
         subscription = await self.client.subscribe(
             subject=self.format_topic(consumer.topic),
             queue=f"{group}:{consumer.name}",
@@ -165,8 +172,8 @@ class JetStreamBroker(
     def __init__(
         self,
         *,
-        prefetch_count: int = 10,
         fetch_timeout: int = 10,
+        prefetch_count: int | None = None,
         jetstream_options: dict[str, Any] | None = None,
         kv_options: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -199,7 +206,7 @@ class JetStreamBroker(
         except KeyNotFoundError:
             self.logger.warning(f"Key {key} not found")
 
-    async def store_result(self, key: str, result: Ok | Error):
+    async def store_result(self, key: str, result: Ok | Error) -> None:
         await self.kv.put(key, self.encoder.encode(result))
 
     async def publish(
@@ -224,7 +231,9 @@ class JetStreamBroker(
             await self.flush()
         return response
 
-    async def sender(self, group: str, consumer: Consumer, send_stream):
+    async def sender(
+        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+    ) -> None:
         config = consumer.options.get("config", ConsumerConfig())
 
         if config.ack_wait is None:
@@ -232,8 +241,11 @@ class JetStreamBroker(
                 to_float(consumer.timeout) or self.default_consumer_timeout
             ) + 30
             config.ack_wait = ack_wait  # consumer timeout + 30s for .ack()
-        batch_size = consumer.concurrency
-        timeout = consumer.options.get("fetch_timeout", self.fetch_timeout)
+        batch = (
+            consumer.options.get("batch")
+            or self.prefetch_count
+            or consumer.concurrency * 2
+        )
 
         subscription = await self.js.pull_subscribe(
             subject=self.format_topic(consumer.topic),
@@ -246,7 +258,7 @@ class JetStreamBroker(
                 while True:
                     try:
                         messages = await subscription.fetch(
-                            batch=batch_size, timeout=timeout
+                            batch=batch, timeout=self.fetch_timeout
                         )
                         for message in messages:
                             await send_stream.send(message)

@@ -47,7 +47,7 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
         log_exceptions: bool = True,
         *args: P.args,
         **kwargs: P.kwargs,
-    ):
+    ) -> None:
         if Fail not in throws:
             throws = (*throws, Fail)
         self.throws = throws
@@ -57,7 +57,7 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
             delay_generator(*args, **kwargs) if delay_generator else expo()
         )
 
-    def retry(self, message: CloudEventType, exc: Exception):
+    def retry(self, message: CloudEventType, exc: Exception) -> None:
         delay = getattr(exc, "delay", None)
         if delay is None:
             delay = self.delay_generator(message, exc)
@@ -68,13 +68,15 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
             )
         raise Retry(delay=delay) from exc
 
-    def fail(self, message: CloudEventType, exc: Exception):
+    def fail(self, message: CloudEventType, exc: Exception) -> None:
         self.logger.exception(
             f"Retry limit exceeded for message {message.id}", exc_info=exc
         )
         raise Fail(reason="Retry limit exceeded") from exc
 
-    def maybe_retry(self, service: Service, message: CloudEventType, exc: Exception):
+    def maybe_retry(
+        self, service: Service, message: CloudEventType, exc: Exception
+    ) -> None:
         if not (self.throws and isinstance(exc, self.throws)):
             self.retry(message, exc)
         else:
@@ -84,13 +86,15 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
 class MaxAge(RetryStrategy[P, CloudEventType]):
     def __init__(
         self, max_age: timedelta | dict[str, Any] = timedelta(seconds=60), **extra
-    ):
+    ) -> None:
         super().__init__(**extra)
         if isinstance(max_age, Mapping):
             max_age = timedelta(**max_age)
         self.max_age: timedelta = max_age
 
-    def maybe_retry(self, service: Service, message: CloudEventType, exc: Exception):
+    def maybe_retry(
+        self, service: Service, message: CloudEventType, exc: Exception
+    ) -> None:
         if message.age <= self.max_age:
             super().maybe_retry(service, message, exc)
         else:
@@ -98,11 +102,13 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
 
 
 class MaxRetries(RetryStrategy[P, CloudEventType]):
-    def __init__(self, max_retries: int = 3, **extra):
+    def __init__(self, max_retries: int = 3, **extra) -> None:
         super().__init__(**extra)
         self.max_retries = max_retries
 
-    def maybe_retry(self, service: Service, message: CloudEventType, exc: Exception):
+    def maybe_retry(
+        self, service: Service, message: CloudEventType, exc: Exception
+    ) -> None:
         retries = service.broker.get_num_delivered(message.raw)
         if retries is None:
             self.logger.warning(
@@ -118,7 +124,7 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
 class RetryWhen(RetryStrategy[P, CloudEventType]):
     def __init__(
         self, retry_when: Callable[[CloudEventType, Exception], bool], **extra
-    ):
+    ) -> None:
         super().__init__(**extra)
         self.retry_when = retry_when
 
@@ -127,7 +133,7 @@ class RetryWhen(RetryStrategy[P, CloudEventType]):
         service: Service,
         message: CloudEventType,
         exc: Exception,
-    ):
+    ) -> None:
         if self.retry_when(message, exc):
             super().maybe_retry(service, message, exc)
         else:
@@ -147,7 +153,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
         self,
         delay_header: str = "x-delay",
         default_retry_strategy: RetryStrategy = MaxAge(max_age=timedelta(hours=1)),
-    ):
+    ) -> None:
         self.delay_header = delay_header
         self.default_retry_strategy = default_retry_strategy
 
@@ -159,7 +165,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
         message: CloudEventType,
         result: Any | None = None,
         exc: Exception | None = None,
-    ):
+    ) -> None:
         if exc is None or isinstance(exc, (Retry, Fail, Skip)):
             return
 

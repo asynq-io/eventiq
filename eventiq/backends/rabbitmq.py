@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Union
 
 import aio_pika
 from aio_pika.abc import (
@@ -29,7 +29,9 @@ if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer
 
 
-class RabbitmqBroker(UrlBroker[AbstractIncomingMessage, ConfirmationFrameType]):
+class RabbitmqBroker(
+    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]]
+):
     """
     RabbitMQ broker implementation, based on `aio_pika` library.
     :param default_prefetch_count: default number of messages to prefetch (per queue)

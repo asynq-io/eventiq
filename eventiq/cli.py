@@ -19,6 +19,13 @@ if "." not in sys.path:
     sys.path.insert(0, ".")
 
 
+def import_service(path: str) -> Service:
+    service = import_from_string(path)
+    if not isinstance(service, Service):
+        raise TypeError(f"Service must be an instance of Service, got {type(service)}")
+    return service
+
+
 def _build_target_from_opts(
     service: str,
     log_level: Optional[str],
@@ -32,9 +39,9 @@ def _build_target_from_opts(
     if log_config:
         cmd.append(f"--log-config={log_config}")
     if use_uvloop:
-        cmd.append("--use-uvloop=true")
+        cmd.append("--use-uvloop")
     if debug:
-        cmd.append("--debug=true")
+        cmd.append("--debug")
     return " ".join(cmd)
 
 
@@ -79,7 +86,7 @@ def run(
         logging.config.fileConfig(log_config)
 
     logger.info(f"Running [{service}]...")
-    instance: Service = import_from_string(service)
+    instance = import_service(service)
     anyio.run(
         instance.run,
         True,
@@ -107,7 +114,7 @@ def send(
         help="Message type",
     ),
 ):
-    svc: Service = import_from_string(service)
+    svc = import_service(service)
 
     async def connect_and_send(message):
         await svc.broker.connect()
@@ -134,7 +141,7 @@ def docs(
 ):
     from eventiq.asyncapi import get_async_api_spec, save_async_api_to_file
 
-    svc = import_from_string(service)
+    svc = import_service(service)
     spec = get_async_api_spec(svc)
     save_async_api_to_file(spec, out, format)
     typer.secho(f"Docs saved successfully to {out}", fg="green")

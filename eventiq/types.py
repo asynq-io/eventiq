@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Protocol,
+    TypedDict,
     TypeVar,
     Union,
     overload,
@@ -41,3 +42,11 @@ class Decoder(Protocol[T]):
 
     @overload
     def decode(self, data: RawData, as_type: None = None) -> Any: ...
+
+
+class Parameter(TypedDict, total=False):
+    enum: list[str]
+    default: str
+    description: str
+    examples: list[str]
+    location: str

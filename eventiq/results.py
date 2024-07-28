@@ -52,7 +52,7 @@ class ResultBackendMiddleware(Middleware):
         message: CloudEvent,
         result: Any | None = None,
         exc: Exception | None = None,
-    ):
+    ) -> None:
         if not consumer.options.get("store_results"):
             return
         if isinstance(service.broker, ResultBackend) and service.broker.store_results:

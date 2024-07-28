@@ -1,5 +1,6 @@
 from typing import Any, Generic, Literal, Optional, TypeVar
 
+from pydantic.networks import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .imports import ImportedType
@@ -16,7 +17,7 @@ class BrokerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BROKER_")
 
 
-Url = TypeVar("Url")
+Url = TypeVar("Url", bound=AnyUrl)
 
 
 class UrlBrokerSettings(BrokerSettings, Generic[Url]):
@@ -29,4 +30,4 @@ class ServiceSettings(BaseSettings):
     title: Optional[str] = None
     version: str = "0.1.0"
     description: str = ""
-    asyncapi: Literal["2.6.0", "3.0.0"] = "3.0.0"
+    asyncapi: Literal["3.0.0"] = "3.0.0"

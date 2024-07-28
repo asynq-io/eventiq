@@ -47,13 +47,29 @@ service = Service(
             topic="test.topic.{param}.*",
             tags=["tag2"],
             summary="Publishes when X happens",
+            parameters={
+                "param": {
+                    "enum": ["x", "y", "z"],
+                    "description": "Description for param",
+                },
+            },
         ),
     ],
     tags_metadata=[{"name": "tag1", "description": "Some tag 1"}],
 )
 
 
-@service.subscribe(topic="test.topic.{param}.*", tags=["tag1"])
+@service.subscribe(
+    topic="test.topic.{param}.*",
+    tags=["tag1"],
+    parameters={
+        "param": {
+            "enum": ["a", "b", "c"],
+            "description": "Some description",
+            "examples": ["a", "b"],
+        }
+    },
+)
 async def example_handler(message: MyEvent):
     """Consumer for processing MyEvent(s)"""
     # message.params.param

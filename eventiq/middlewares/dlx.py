@@ -17,7 +17,7 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
         type_: str = "MessageFailedEvent",
         event_class: type[CloudEvent] = CloudEvent,
         **kwargs,
-    ):
+    ) -> None:
         self.event_class = event_class
         self.topic = topic
         self.type_ = type_
@@ -30,7 +30,8 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
         consumer: Consumer,
         message: CloudEventType,
         exc: Fail,
-    ):
-        topic = self.topic.format(message=message, consumer=consumer, service=service)
-        ce = self.event_class.new(message, type_=self.type_, topic=topic, **self.kwargs)
+    ) -> None:
+        ce = self.event_class.new(
+            message, type_=self.type_, topic=self.topic, **self.kwargs
+        )
         await service.publish(ce)

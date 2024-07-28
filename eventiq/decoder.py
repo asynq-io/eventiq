@@ -11,7 +11,7 @@ AnyType: TypeAdapter = TypeAdapter(Any)
 
 
 class JsonDecoder:
-    def __init__(self, strict: bool = False, context: Any = None):
+    def __init__(self, strict: bool = False, context: Any = None) -> None:
         self.strict = strict
         self.context = context
 

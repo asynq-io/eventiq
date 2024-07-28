@@ -98,7 +98,7 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
         consumer: Consumer,
         message: CloudEventType,
         exc: Fail,
-    ):
+    ) -> None:
         """Called after message is failed by the middleware"""
 
     async def after_retry_message(
