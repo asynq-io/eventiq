@@ -67,7 +67,7 @@ def run(
                 "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'."
             )
             return
-        logger.info(f"Watching [{service}]...")
+        logger.info(f"Watching for changes in: {reload}")
         target = _build_target_from_opts(
             service, log_level, log_config, use_uvloop, debug
         )
@@ -84,9 +84,8 @@ def run(
         logging.basicConfig(level=log_level.upper())
     if log_config:
         logging.config.fileConfig(log_config)
-
-    logger.info(f"Running [{service}]...")
     instance = import_service(service)
+    logger.info(f"Running service: {service}...")
     anyio.run(
         instance.run,
         True,

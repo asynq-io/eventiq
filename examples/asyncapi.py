@@ -15,7 +15,6 @@ class MyData(BaseModel):
     info: str
 
 
-# @publishes("test.topic.{param}.*")
 class MyEvent(CloudEvent[MyData]):
     """Some custom event"""
 
@@ -72,7 +71,6 @@ service = Service(
 )
 async def example_handler(message: MyEvent):
     """Consumer for processing MyEvent(s)"""
-    # message.params.param
     print(f"Received Message {message.id} with data: {message.data}")
 
 
