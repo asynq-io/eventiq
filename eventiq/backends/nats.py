@@ -29,7 +29,6 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 
 class JetStreamSettings(NatsSettings):
-    prefetch_count: int | None = None
     fetch_timeout: int = 10
     jetstream_options: dict[str, Any] = {}
     kv_options: dict[str, Any] = {}
@@ -173,13 +172,11 @@ class JetStreamBroker(
         self,
         *,
         fetch_timeout: int = 10,
-        prefetch_count: int | None = None,
         jetstream_options: dict[str, Any] | None = None,
         kv_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.prefetch_count = prefetch_count
         self.fetch_timeout = fetch_timeout
         self.jetstream_options = jetstream_options or {}
         self.js = JetStreamContext(self.client, **self.jetstream_options)
@@ -241,11 +238,7 @@ class JetStreamBroker(
                 to_float(consumer.timeout) or self.default_consumer_timeout
             ) + 30
             config.ack_wait = ack_wait  # consumer timeout + 30s for .ack()
-        batch = (
-            consumer.options.get("batch")
-            or self.prefetch_count
-            or consumer.concurrency * 2
-        )
+        batch = consumer.options.get("batch", consumer.concurrency * 2)
 
         subscription = await self.js.pull_subscribe(
             subject=self.format_topic(consumer.topic),
