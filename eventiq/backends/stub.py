@@ -88,8 +88,9 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         data = self._encode_message(message, encoder)
         headers = kwargs.get("headers", {})
         response = {}
+        message_topic = self.format_topic(message.topic)
         for topic, queue in self.topics.items():
-            if re.fullmatch(topic, message.topic):
+            if re.fullmatch(message_topic, topic):
                 event = asyncio.Event()
                 msg = StubMessage(data=data, queue=queue, event=event, headers=headers)
                 await queue.put(msg)
