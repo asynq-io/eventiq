@@ -9,24 +9,48 @@ description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
-keywords = []
+keywords = [
+    "framework",
+    "asyncio",
+    "microservice",
+    "event-driven",
+    "cloud-events",
+]
 authors = [{ name = "RaRhAeu", email = "rarha_eu@protonmail.com" }]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Programming Language :: Python",
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Framework :: AsyncIO",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
 ]
-dependencies = []
+dependencies = [
+    "anyio>4.0,<5.0",
+    "typer",
+    "pydantic >2.0,<3",
+    "pydantic-settings>2.0,<3",
+    "pydantic-asyncapi==0.2.1",
+]
 
 [project.urls]
 Documentation = "https://github.com/asynq-io/eventiq#readme"
 Issues = "https://github.com/asynq-io/eventiq/issues"
 Source = "https://github.com/asynq-io/eventiq"
+
+[project.scripts]
+eventiq = "eventiq.cli:cli"
+
+[project.optional-dependencies]
+nats = ["nats-py"]
+rabbitmq = ["aio-pika"]
+kafka = ["aiokafka"]
+redis = ["redis"]
 
 [tool.hatch.version]
 path = "eventiq/__about__.py"
@@ -34,11 +58,19 @@ path = "eventiq/__about__.py"
 [tool.hatch.envs.default]
 dependencies = [
     "pytest",
-    "pyyaml",
+    "pytest-asyncio",
+    "pytest-sugar",
     "pytest-cov",
-    "ruff",
+    "pytest-repeat",
+    "pyyaml",
+    "ruff==0.5.2",
     "mypy>=1.0.0",
     "bandit",
+    "nats-py",
+    "aiokafka",
+    "aio-pika",
+    "redis",
+    "watchfiles",
 ]
 
 [tool.hatch.envs.default.scripts]
@@ -46,7 +78,7 @@ test = "pytest {args:tests}"
 check = [
     "ruff check ./eventiq",
     "ruff format --check ./eventiq",
-    "mypy --install-types --non-interactive {args:eventiq tests}",
+    "mypy --install-types --non-interactive --enable-incomplete-feature=Unpack {args:eventiq tests}",
     "bandit -r ./eventiq",
 ]
 
@@ -62,6 +94,12 @@ tests = ["tests"]
 
 [tool.coverage.report]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=./eventiq"
+testpaths = ["./tests"]
+asyncio_mode = "auto"
+filterwarnings = "ignore::DeprecationWarning"
 
 [tool.pyright]
 venvPath = ".venv"
