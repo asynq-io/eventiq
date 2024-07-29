@@ -113,19 +113,15 @@ class CloudEvent(BaseModel, Generic[D]):
             raise ValueError("raw property accessible only for incoming messages")
         return self._raw
 
-    @raw.setter
-    def raw(self, value: Any) -> None:
-        self._raw = value
-
     @property
     def service(self) -> "Service":
         if self._service is None:
             raise ValueError("Service not set")
         return self._service
 
-    @service.setter
-    def service(self, value: "Service") -> None:
-        self._service = value
+    def set_context(self, service: "Service", raw: Any) -> None:
+        self._service = service
+        self._raw = raw
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("by_alias", True)

@@ -3,7 +3,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Protocol,
-    TypedDict,
     TypeVar,
     Union,
     overload,
@@ -12,6 +11,7 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from .models import CloudEvent

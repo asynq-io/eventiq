@@ -234,8 +234,7 @@ class Service(Generic[Message, R], LoggerMixin):
         try:
             data = self.broker.get_message_data(raw_message)
             message = decoder.decode(data, consumer.event_type)
-            message.raw = raw_message
-            message.service = self
+            message.set_context(self, raw_message)
         except (DecodeError, ValidationError) as e:
             self.logger.error(f"Failed to validate message {raw_message}.", exc_info=e)
             if self.broker.should_nack(raw_message):

@@ -9,12 +9,11 @@ from typing import (
     Any,
     Callable,
     Generic,
-    TypedDict,
     Union,
     overload,
 )
 
-from typing_extensions import Unpack
+from typing_extensions import TypedDict, Unpack
 
 from .logging import get_logger
 from .types import CloudEventType, Decoder, Parameter, Timeout
