@@ -95,10 +95,8 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     ) -> Broker:
         if cls == Broker:
             type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
-            broker_type = import_from_string(type_name)
-        else:
-            broker_type = cls
-        return broker_type._from_env(**kwargs)
+            cls = import_from_string(type_name)
+        return cls._from_env(**kwargs)
 
     @staticmethod
     def get_message_metadata(raw_message: Message) -> dict[str, str]:

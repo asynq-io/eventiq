@@ -1,16 +1,21 @@
+<p align="center">
+<img src="https://raw.githubusercontent.com/asynq-io/eventiq/main/assets/logo.svg" style="width: 250px">
+
+</p>
+<p align="center">
+<em>Asyncio native pub/sub framework for Python</em>
+</p>
+
 ![Tests](https://github.com/asynq-io/eventiq/workflows/Tests/badge.svg)
 ![Build](https://github.com/asynq-io/eventiq/workflows/Publish/badge.svg)
 ![License](https://img.shields.io/github/license/asynq-io/eventiq)
+![Mypy](https://img.shields.io/badge/mypy-checked-blue)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)](https://github.com/charliermarsh/ruff)
+[![Pydantic v2](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/pydantic/pydantic/main/docs/badge/v2.json)](https://docs.pydantic.dev/latest/contributing/#badges)
+[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 ![Python](https://img.shields.io/pypi/pyversions/eventiq)
 ![Format](https://img.shields.io/pypi/format/eventiq)
 ![PyPi](https://img.shields.io/pypi/v/eventiq)
-![Mypy](https://img.shields.io/badge/mypy-checked-blue)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)](https://github.com/charliermarsh/ruff)
-[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
-
-# eventiq
-
-Publish/Subscribe asyncio framework for Python
 
 ## Installation
 ```shell
@@ -37,7 +42,7 @@ pip install 'eventiq[broker]'
 ## Features
 
 - Modern, `asyncio` based python 3.8+ syntax
-- Minimal external dependencies
+- Minimal external dependencies (`anyio`, `pydantic`, `typer`)
 - Automatic message parsing based on type annotations using `pydantic`
 - Code hot-reload
 - Highly scalable: each service can process hundreds of tasks concurrently,
@@ -45,6 +50,7 @@ pip install 'eventiq[broker]'
 - Resilient - at least once delivery for all messages by default
 - Customizable & pluggable message encoders (json by default)
 - Multiple broker support
+    - Memory (for testing)
     - Nats
     - Kafka
     - Rabbitmq
@@ -53,7 +59,13 @@ pip install 'eventiq[broker]'
 - Cloud Events standard as base message structure (no more python specific `*args` and `**kwargs` in messages)
 - AsyncAPI documentation generation from code
 - Twelve factor app approach - stdout logging, configuration through environment variables
-- Available extensions for integrating with Prometheus (metrics) and OpenTelemetry (tracing, metrics)
+- Multiple extensions and integrations including:
+  - Prometheus - mertics exporter
+  - OpenTelemetry - tracing and metrics
+  - Message Pack - message pack encoder for messages
+  - FastAPI - integrating eventiq Service with FastAPI applications (WIP)
+  - Dataref - data reference resolver for messages (WIP)
+  - Eventiq Workflows - orchestration engine built on top of eventiq (WIP)
 
 ## Basic Usage
 
@@ -148,7 +160,7 @@ Installing shell autocompletion:
 eventiq --install-completion [bash|zsh|fish|powershell|pwsh]
 ```
 
-### Basic commands
+Basic commands
 
 - `run` - run service
 - `docs` - generate AsyncAPI docs
