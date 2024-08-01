@@ -213,6 +213,7 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
         info=Info(
             title=service.title, version=service.version, **service.async_api_extra
         ),
+        defaultContentType=service.broker.encoder.CONTENT_TYPE,
         servers={
             service.broker.name: Server(
                 protocol=service.broker.protocol,
