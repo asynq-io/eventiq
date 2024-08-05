@@ -6,7 +6,6 @@ from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
-from anyio import get_cancelled_exc_class
 from anyio.streams.memory import MemoryObjectSendStream
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
@@ -54,7 +53,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     def __init__(
         self,
         *,
-        auto_flush: bool = False,
+        auto_flush: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -127,12 +126,11 @@ class NatsBroker(AbstractNatsBroker[None]):
             async with send_stream:
                 async for message in subscription.messages:
                     await send_stream.send(message)
-        except get_cancelled_exc_class():
+        finally:
             with anyio.move_on_after(2, shield=True):
                 if consumer.dynamic:
                     await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
-            raise
 
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs

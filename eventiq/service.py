@@ -144,8 +144,8 @@ class Service(Generic[Message, R], LoggerMixin):
 
     async def run(self, enable_signal_handler: bool = True) -> None:
         async with self.lifespan(self):
-            await self.connect()
             try:
+                await self.connect()
                 async with anyio.create_task_group() as tg:
                     if enable_signal_handler:
                         tg.start_soon(self.watch_for_signals, tg.cancel_scope)
@@ -330,11 +330,17 @@ class Service(Generic[Message, R], LoggerMixin):
         await getattr(self, self.broker.default_on_exc)(consumer, message.raw)
 
     @asynccontextmanager
-    async def dynamic_subscription(
+    async def subscription(
         self, event_type: type[CloudEvent], auto_ack: bool = False, **options
     ) -> AsyncIterator[
         MemoryObjectReceiveStream[tuple[CloudEvent, Callable[[], None]]]
     ]:
+        """
+        async with service.subscription(MyEvent, topic="example.topic") as subscription:
+            async for event, ack in subscription:
+                print(event)
+                ack()
+        """
         send_stream, receive_stream = create_memory_object_stream[Any](1)
         consumer_send, user_receive = create_memory_object_stream[
             tuple[CloudEvent, Callable[[], None]]

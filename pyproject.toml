@@ -58,6 +58,7 @@ path = "eventiq/__about__.py"
 [tool.hatch.envs.default]
 dependencies = [
     "pytest",
+    "pytest-asyncio",
     "pytest-sugar",
     "pytest-cov",
     "pytest-repeat",
@@ -95,6 +96,7 @@ tests = ["tests"]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 addopts = "--cov=./eventiq"
 testpaths = ["./tests"]
 filterwarnings = "ignore::DeprecationWarning"
