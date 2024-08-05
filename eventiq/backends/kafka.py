@@ -5,6 +5,7 @@ from itertools import chain
 from typing import TYPE_CHECKING, Annotated, Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
+from anyio import move_on_after
 from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 
@@ -90,6 +91,7 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         subscriber.subscribe(pattern=self.format_topic(consumer.topic))
         await subscriber.start()
         timeout_ms = consumer.options.get("timeout_ms", 600)
+
         try:
             async with send_stream:
                 while True:
@@ -98,10 +100,11 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
                         self._subcsribers[id(message)] = subscriber
                         await send_stream.send(message)
         finally:
-            await subscriber.stop()
+            with move_on_after(1, shield=True):
+                await subscriber.stop()
 
-            if consumer.dynamic:
-                subscriber.unsubscribe()
+                if consumer.dynamic:
+                    subscriber.unsubscribe()
 
     async def ack(self, raw_message: ConsumerRecord) -> None:
         subscriber = self._subcsribers.pop(id(raw_message), None)
@@ -128,10 +131,11 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         return self._publisher
 
     async def connect(self):
-        self._publisher = AIOKafkaProducer(
-            bootstrap_servers=self.url, **self.connection_options
-        )
-        await self._publisher.start()
+        if self._publisher is None:
+            self._publisher = AIOKafkaProducer(
+                bootstrap_servers=self.url, **self.connection_options
+            )
+            await self._publisher.start()
 
     async def publish(
         self,

@@ -18,7 +18,6 @@ class _Sentinel(Exception):
 class Middleware(Generic[CloudEventType], LoggerMixin):
     """Base class for middlewares"""
 
-    throws: type[Exception] | tuple[type[Exception], ...] = _Sentinel
     requires: type[CloudEventType] | None = None
 
     async def before_broker_connect(self, *, service: Service) -> None:

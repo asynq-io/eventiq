@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from typing import Any, Callable, Generic
 
@@ -12,12 +13,12 @@ from anyio.streams.memory import MemoryObjectReceiveStream
 from pydantic import ValidationError
 
 from .broker import Broker, R
-from .consumer import Consumer, ConsumerGroup
+from .consumer import ChannelConsumer, Consumer, ConsumerGroup
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .middleware import Middleware
 from .models import CloudEvent, Publishes
-from .results import Result, ResultBackend
+from .results import Result, ResultBackend, ResultBackendMiddleware
 from .types import ID, Decoder, Encoder, Message
 from .utils import to_float
 
@@ -31,6 +32,8 @@ async def nullcontext(service: Service):
 
 class Service(Generic[Message, R], LoggerMixin):
     """Logical group of consumers. Provides group (queue) name and handles versioning"""
+
+    default_middlewares: list[Middleware] = []
 
     def __init__(
         self,
@@ -53,7 +56,13 @@ class Service(Generic[Message, R], LoggerMixin):
         self.description = description
         self.tags_metadata = tags_metadata or []
         self.consumer_group = ConsumerGroup()
-        self.middlewares = middlewares or []
+        self.middlewares = self.default_middlewares
+        if middlewares:
+            self.middlewares.extend(middlewares)
+        if isinstance(broker, ResultBackend) and not any(
+            isinstance(m, ResultBackendMiddleware) for m in self.middlewares
+        ):
+            self.middlewares.append(ResultBackendMiddleware())
         self.lifespan = lifespan
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
@@ -148,6 +157,7 @@ class Service(Generic[Message, R], LoggerMixin):
     @asynccontextmanager
     async def context(self):
         task = asyncio.create_task(self.run(enable_signal_handler=False))
+        await asyncio.sleep(0)
         yield
         with suppress(asyncio.CancelledError):
             task.cancel()
@@ -160,22 +170,23 @@ class Service(Generic[Message, R], LoggerMixin):
                 scope.cancel()
 
     async def get_result(self, message_id: ID) -> Result | None:
-        if isinstance(self.broker, ResultBackend):
-            return await self.broker.get_result(f"{self.name}:{message_id}")
+        if not isinstance(self.broker, ResultBackend):
+            raise TypeError(f"Broker {type(self.broker)} does not support results")
+        return await self.broker.get_result(f"{self.name}:{message_id}")
 
-    async def _dispatch(self, full_event: str, **kwargs) -> None:
+    async def _dispatch(self, event: str, **kwargs) -> None:
         message = kwargs.get("message")
         for middleware in self.middlewares:
-            try:
-                if not message or (
-                    middleware.requires is None
-                    or isinstance(message, middleware.requires)
-                ):
-                    await getattr(middleware, full_event)(service=self, **kwargs)
-            except middleware.throws as e:
-                self.logger.warning(
-                    "Error in middleware  %s", type(middleware), exc_info=e
-                )
+            if message and (
+                middleware.requires is not None
+                and not isinstance(message, middleware.requires)
+            ):
+                continue
+            method = getattr(middleware, event, None)
+            if method is None:
+                continue
+
+            await method(service=self, **kwargs)
 
     async def dispatch_before(self, event: str, **kwargs) -> None:
         await self._dispatch(f"before_{event}", **kwargs)
@@ -231,6 +242,7 @@ class Service(Generic[Message, R], LoggerMixin):
     ):
         exc: Exception | None = None
         result = None
+
         try:
             data = self.broker.get_message_data(raw_message)
             message = decoder.decode(data, consumer.event_type)
@@ -254,10 +266,13 @@ class Service(Generic[Message, R], LoggerMixin):
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
+        except anyio.get_cancelled_exc_class():
+            with anyio.fail_after(1):
+                await self.nack(consumer, raw_message)
+            raise
         except Exception as e:
             exc = e
-        finally:
-            await self._handle_message_finalization(consumer, message, result, exc)
+        await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(
         self,
@@ -313,3 +328,23 @@ class Service(Generic[Message, R], LoggerMixin):
             return
 
         await getattr(self, self.broker.default_on_exc)(consumer, message.raw)
+
+    @asynccontextmanager
+    async def dynamic_subscription(
+        self, event_type: type[CloudEvent], auto_ack: bool = False, **options
+    ) -> AsyncIterator[
+        MemoryObjectReceiveStream[tuple[CloudEvent, Callable[[], None]]]
+    ]:
+        send_stream, receive_stream = create_memory_object_stream[Any](1)
+        consumer_send, user_receive = create_memory_object_stream[
+            tuple[CloudEvent, Callable[[], None]]
+        ](1)
+        options["dynamic"] = True
+        consumer = ChannelConsumer(
+            channel=consumer_send, auto_ack=auto_ack, event_type=event_type, **options
+        )
+
+        async with anyio.create_task_group() as tg, consumer_send, user_receive:
+            tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
+            tg.start_soon(self.receiver, consumer, receive_stream)
+            yield user_receive

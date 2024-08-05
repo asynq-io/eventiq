@@ -9,6 +9,7 @@ from aio_pika.abc import (
     AbstractRobustConnection,
 )
 from aiormq.abc import ConfirmationFrameType
+from anyio import move_on_after
 from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 
@@ -106,9 +107,11 @@ class RabbitmqBroker(
                     await send_stream.send(message)
 
         finally:
-            if consumer.dynamic:
-                await queue.unbind(self.exchange, routing_key=consumer.topic)
-            await channel.close()
+            with move_on_after(1, shield=True):
+                if consumer.dynamic:
+                    await queue.unbind(self.exchange, routing_key=consumer.topic)
+                await channel.close()
+            raise
 
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs

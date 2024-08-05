@@ -71,7 +71,6 @@ class RedisBroker(
             await sub.psubscribe(consumer.topic)
             async with send_stream:
                 while True:
-                    # TODO: timeout?
                     message = await sub.get_message(ignore_subscribe_messages=True)
                     if message:
                         await send_stream.send(message)

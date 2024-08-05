@@ -11,7 +11,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.fields import FieldInfo, _FieldInfoInputs
-from pydantic_core.core_schema import ValidationInfo
 
 from .types import Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
@@ -102,7 +101,7 @@ class CloudEvent(BaseModel, Generic[D]):
 
     @field_validator("type", mode="before")
     @classmethod
-    def get_default_type(cls, value, info: ValidationInfo):
+    def get_default_type(cls, value: Any):
         if value is None:
             return cls.__name__
         return value
@@ -134,10 +133,6 @@ class CloudEvent(BaseModel, Generic[D]):
         if headers:
             self._headers.update(headers)
         return self
-
-    @property
-    def extra_span_attributes(self) -> dict[str, str]:
-        return {}
 
     @property
     def age(self) -> timedelta:

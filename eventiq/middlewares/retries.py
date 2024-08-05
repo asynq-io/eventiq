@@ -114,7 +114,7 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
             self.logger.warning(
                 "Retries property not found in message, backing off to message.age.seconds"
             )
-            retries = int(message.age.seconds**0.5)
+            retries = int(message.age.total_seconds() ** 0.5)
         if retries <= self.max_retries:
             super().maybe_retry(service, message, exc)
         else:
@@ -152,7 +152,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
         delay_header: str = "x-delay",
-        default_retry_strategy: RetryStrategy = MaxAge(max_age=timedelta(hours=1)),
+        default_retry_strategy: RetryStrategy = MaxAge(max_age=timedelta(hours=6)),
     ) -> None:
         self.delay_header = delay_header
         self.default_retry_strategy = default_retry_strategy

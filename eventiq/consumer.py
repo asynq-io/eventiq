@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import (
@@ -12,12 +12,15 @@ from typing import (
     Union,
     overload,
 )
+from uuid import uuid4
 
+import anyio
+from anyio.streams.memory import MemoryObjectSendStream
 from typing_extensions import TypedDict, Unpack
 
 from .logging import get_logger
 from .types import CloudEventType, Decoder, Parameter, Timeout
-from .utils import resolve_message_type_hint, to_async
+from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
     from .models import Publishes
@@ -85,7 +88,7 @@ class FnConsumer(Consumer[CloudEventType]):
             extra["event_type"] = resolve_message_type_hint(fn)
         if "description" not in extra:
             extra["description"] = fn.__doc__ or ""
-        if not asyncio.iscoroutinefunction(fn):
+        if not is_async_callable(fn):
             fn = to_async(fn)
         self.fn = fn
         super().__init__(**extra)
@@ -104,6 +107,25 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
             extra["description"] = type(self).__doc__ or ""
 
         super().__init__(**extra)
+
+
+class ChannelConsumer(Consumer[CloudEventType]):
+    def __inii__(
+        self,
+        channel: MemoryObjectSendStream[tuple[CloudEventType, Callable[[], None]]],
+        **extra: Any,
+    ) -> None:
+        if "name" not in extra:
+            extra["name"] = f"{socket.gethostname()}:{uuid4()}"
+        super().__init__(**extra)
+        self.channel = channel
+        self._timeout = to_float(self.timeout) or 10.0
+
+    async def process(self, message: CloudEventType) -> Any:
+        event = anyio.Event()
+        await self.channel.send((message, event.set))
+        with anyio.fail_after(self._timeout):
+            await event.wait()
 
 
 MessageHandlerT = Union[type[GenericConsumer], Fn]

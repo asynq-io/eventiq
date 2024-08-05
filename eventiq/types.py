@@ -10,7 +10,7 @@ from typing import (
 )
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
@@ -26,6 +26,7 @@ Timeout = Union[Seconds, timedelta]
 RawData = Union[str, bytes, bytearray]
 
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
+AnyType: TypeAdapter = TypeAdapter(Any)
 
 
 @runtime_checkable

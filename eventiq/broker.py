@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 import os
-import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 from urllib.parse import urlparse
@@ -22,7 +21,6 @@ from .utils import format_topic, to_float
 if TYPE_CHECKING:
     from eventiq import Consumer
 
-TOPIC_PATTERN = re.compile(r"{\w+}")
 
 R = TypeVar("R", bound=Any)
 
@@ -79,24 +77,6 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
     def should_nack(self, raw_message: Message) -> bool:
         return False
-
-    @classmethod
-    def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
-        return cls(**settings.model_dump(), **kwargs)
-
-    @classmethod
-    def _from_env(cls, **kwargs) -> Broker:
-        return cls.from_settings(cls.Settings(**kwargs))
-
-    @classmethod
-    def from_env(
-        cls,
-        **kwargs,
-    ) -> Broker:
-        if cls == Broker:
-            type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
-            cls = import_from_string(type_name)
-        return cls._from_env(**kwargs)
 
     @staticmethod
     def get_message_metadata(raw_message: Message) -> dict[str, str]:
@@ -160,6 +140,24 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
     def get_num_delivered(self, raw_message: Message) -> int | None:
         return None
+
+    @classmethod
+    def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
+        return cls(**settings.model_dump(), **kwargs)
+
+    @classmethod
+    def _from_env(cls, **kwargs) -> Broker:
+        return cls.from_settings(cls.Settings(**kwargs))
+
+    @classmethod
+    def from_env(
+        cls,
+        **kwargs,
+    ) -> Broker:
+        if cls == Broker:
+            type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
+            cls = import_from_string(type_name)
+        return cls._from_env(**kwargs)
 
 
 class UrlBroker(Broker[Message, R], ABC):

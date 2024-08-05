@@ -10,8 +10,10 @@ from eventiq import CloudEvent, Consumer, GenericConsumer, Service
 from eventiq.backends.stub import StubBroker
 from eventiq.middleware import Middleware
 
+pytestmark = pytest.mark.anyio
 
-@pytest_asyncio.fixture(scope="session")
+
+@pytest_asyncio.fixture(scope="function")
 def event_loop():
     loop = asyncio.new_event_loop()
     yield loop

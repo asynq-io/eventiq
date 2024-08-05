@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 import re
 from collections.abc import Awaitable
@@ -8,12 +9,13 @@ from typing import Any, Callable, Literal, TypeVar, cast, get_type_hints, overlo
 from urllib.parse import urlparse
 
 from anyio import to_thread
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeGuard
 
 from eventiq.types import Timeout
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=Any)
+
 
 TOPIC_PATTERN = re.compile(r"{\w+}")
 TOPIC_SPECIAL_CHARS = {"{", "}", "*", ">"}
@@ -91,7 +93,7 @@ def to_float(timeout: Timeout) -> float: ...
 
 
 @overload
-def to_float(timeout: Timeout | None) -> float | None: ...
+def to_float(timeout: None) -> None: ...
 
 
 def to_float(timeout: Timeout | None) -> float | None:
@@ -105,3 +107,26 @@ def to_float(timeout: Timeout | None) -> float | None:
 
 def get_annotation(value: str) -> type:
     return cast(type, Literal[value])
+
+
+T = TypeVar("T")
+
+
+AwaitableCallable = Callable[..., Awaitable[T]]
+
+
+@overload
+def is_async_callable(obj: AwaitableCallable[T]) -> TypeGuard[AwaitableCallable[T]]: ...
+
+
+@overload
+def is_async_callable(obj: Any) -> TypeGuard[AwaitableCallable[Any]]: ...
+
+
+def is_async_callable(obj: Any) -> Any:
+    while isinstance(obj, functools.partial):
+        obj = obj.func
+
+    return asyncio.iscoroutinefunction(obj) or (
+        callable(obj) and asyncio.iscoroutinefunction(obj.__call__)
+    )

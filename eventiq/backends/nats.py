@@ -5,6 +5,8 @@ from abc import ABC
 from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any
 
+import anyio
+from anyio import get_cancelled_exc_class
 from anyio.streams.memory import MemoryObjectSendStream
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
@@ -58,18 +60,15 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         super().__init__(**kwargs)
         self.client = Client()
         self._auto_flush = auto_flush
-        for k, v in self.default_connection_options.items():
-            self.connection_options.setdefault(k, v)
+        self.connection_options.setdefault("max_reconnect_attempts", 10)
+        for k in ("error", "closed", "reconnected", "disconnected"):
+            self.connection_options.setdefault(f"{k}_cb", self._default_cb(k))
 
-    @property
-    def default_connection_options(self) -> dict[str, Any]:
-        return {
-            "error_cb": self._error_cb,
-            "closed_cb": self._closed_cb,
-            "reconnected_cb": self._reconnect_cb,
-            "disconnected_cb": self._disconnect_cb,
-            "max_reconnect_attempts": 10,
-        }
+    def _default_cb(self, message: str):
+        async def wrapped(error: Exception | None = None):
+            self.logger.warning(message)
+            if error:
+                self.logger.exception("", exc_info=error)
 
     @staticmethod
     def get_message_metadata(raw_message: NatsMsg) -> dict[str, str]:
@@ -87,25 +86,14 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
             return {}
 
     async def connect(self) -> None:
-        await self.client.connect(self.url, **self.connection_options)
+        if not self.client.is_connected:
+            await self.client.connect(self.url, **self.connection_options)
 
     async def disconnect(self) -> None:
         await self.client.close()
 
     async def flush(self) -> None:
         await self.client.flush()
-
-    async def _disconnect_cb(self) -> None:
-        self.logger.warning("Disconnected")
-
-    async def _reconnect_cb(self) -> None:
-        self.logger.info("Reconnected")
-
-    async def _error_cb(self, e) -> None:
-        self.logger.warning(f"Broker error {e}")
-
-    async def _closed_cb(self) -> None:
-        self.logger.warning("Connection closed")
 
     @property
     def is_connected(self) -> bool:
@@ -117,6 +105,14 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
     def get_asyncapi_bindings(self, event_type: type[CloudEvent]) -> dict[str, Any]:
         return {"queue": event_type.get_default_topic(), "bindingVersion": "0.1.0"}
+
+    async def ack(self, raw_message: NatsMsg) -> None:
+        if not raw_message._ackd:
+            await raw_message.ack()
+
+    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
+        if not raw_message._ackd:
+            await raw_message.nak(delay=delay)
 
 
 class NatsBroker(AbstractNatsBroker[None]):
@@ -131,11 +127,12 @@ class NatsBroker(AbstractNatsBroker[None]):
             async with send_stream:
                 async for message in subscription.messages:
                     await send_stream.send(message)
-
-        finally:
-            if consumer.dynamic:
-                await subscription.unsubscribe()
+        except get_cancelled_exc_class():
+            with anyio.move_on_after(2, shield=True):
+                if consumer.dynamic:
+                    await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
+            raise
 
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
@@ -147,12 +144,6 @@ class NatsBroker(AbstractNatsBroker[None]):
         await self.client.publish(message.topic, data, headers=headers, reply=reply)
         if self._auto_flush or kwargs.get("flush"):
             await self.flush()
-
-    async def ack(self, raw_message: NatsMsg) -> None:
-        pass
-
-    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
-        pass
 
 
 class JetStreamBroker(
@@ -245,7 +236,7 @@ class JetStreamBroker(
             durable=f"{group}:{consumer.name}",
             config=config,
         )
-
+        messages = []
         try:
             async with send_stream:
                 while True:
@@ -256,23 +247,24 @@ class JetStreamBroker(
                         for message in messages:
                             await send_stream.send(message)
                     except asyncio.TimeoutError:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.1)
         finally:
-            if consumer.dynamic:
-                await subscription.unsubscribe()
+            self.logger.info(
+                "Stopping sender for consumer %s. canceling %d messages",
+                consumer.name,
+                len(messages),
+            )
+            with anyio.move_on_after(2, shield=True):
+                for message in messages:
+                    await self.nack(message)
+                    if consumer.dynamic:
+                        await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
+            raise
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         date = raw_message.metadata.timestamp.replace(tzinfo=timezone.utc)
         return date < (utc_now() - timedelta(seconds=self.validate_error_delay))
-
-    async def ack(self, raw_message: NatsMsg) -> None:
-        if not raw_message._ackd:
-            await raw_message.ack()
-
-    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
-        if not raw_message._ackd:
-            await raw_message.nak(delay=delay)
 
     def get_num_delivered(self, raw_message: NatsMsg) -> int | None:
         return raw_message.metadata.num_delivered
