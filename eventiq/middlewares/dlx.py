@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from eventiq.middleware import CloudEventType, Middleware
 from eventiq.models import CloudEvent
 
 if TYPE_CHECKING:
-    from eventiq import Consumer, Service
-    from eventiq.exceptions import Fail
+    from eventiq import Service
 
 
 class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
@@ -16,7 +15,7 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
         topic: str = "dlx",
         type_: str = "MessageFailedEvent",
         event_class: type[CloudEvent] = CloudEvent,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         self.event_class = event_class
         self.topic = topic
@@ -27,9 +26,8 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
         self,
         *,
         service: Service,
-        consumer: Consumer,
         message: CloudEventType,
-        exc: Fail,
+        **_: Any,
     ) -> None:
         ce = self.event_class.new(
             message,

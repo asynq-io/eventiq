@@ -12,4 +12,4 @@ class MyConsumer(GenericConsumer[CloudEvent]):
     name = "example_consumer"
 
     async def process(self, message: CloudEvent):
-        print(message)
+        pass

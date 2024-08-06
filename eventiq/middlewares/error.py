@@ -32,8 +32,8 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         service: Service,
         consumer: Consumer,
         message: CloudEventType,
-        result: Any | None = None,
         exc: Exception | None = None,
+        **_: Any,
     ) -> None:
         if exc and isinstance(exc, self.exc):
             await self.callback(service, consumer, message, exc)

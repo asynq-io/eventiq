@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Callable, Generic, NamedTuple
@@ -32,13 +33,27 @@ def expo(factor: int = 1) -> DelayGenerator:
 
 
 def constant(interval: int = 30) -> DelayGenerator:
-    def _constant(*_) -> int:
+    def _constant(*_: Any) -> int:
         return interval
 
     return _constant
 
 
-class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
+class AbstractRetryStrategy(ABC, Generic[CloudEventType]):
+    @abstractmethod
+    def maybe_retry(
+        self,
+        *,
+        service: Service,
+        message: CloudEventType,
+        exc: Exception,
+    ) -> None:
+        raise NotImplementedError
+
+
+class RetryStrategy(
+    AbstractRetryStrategy[CloudEventType], Generic[P, CloudEventType], LoggerMixin
+):
     def __init__(
         self,
         throws: tuple[type[Exception], ...] = (),
@@ -64,7 +79,8 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
         delay = max(delay, self.min_delay)
         if self.log_exceptions:
             self.logger.warning(
-                f"Will retry message {message.id} in %d seconds.",
+                "Will retry message %s in %d seconds.",
+                message.id,
                 delay,
                 exc_info=exc,
             )
@@ -72,13 +88,15 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
 
     def fail(self, message: CloudEventType, exc: Exception) -> None:
         self.logger.exception(
-            f"Retry limit exceeded for message {message.id}",
+            "Retry limit exceeded for message %s",
+            message.id,
             exc_info=exc,
         )
         raise Fail(reason="Retry limit exceeded") from exc
 
     def maybe_retry(
         self,
+        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -93,7 +111,7 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
     def __init__(
         self,
         max_age: timedelta | dict[str, Any] = timedelta(seconds=60),
-        **extra,
+        **extra: Any,
     ) -> None:
         super().__init__(**extra)
         if isinstance(max_age, Mapping):
@@ -102,23 +120,25 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
 
     def maybe_retry(
         self,
+        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
     ) -> None:
         if message.age <= self.max_age:
-            super().maybe_retry(service, message, exc)
+            super().maybe_retry(service=service, message=message, exc=exc)
         else:
             self.fail(message, exc)
 
 
 class MaxRetries(RetryStrategy[P, CloudEventType]):
-    def __init__(self, max_retries: int = 3, **extra) -> None:
+    def __init__(self, max_retries: int = 3, **extra: Any) -> None:
         super().__init__(**extra)
         self.max_retries = max_retries
 
     def maybe_retry(
         self,
+        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -130,7 +150,7 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
             )
             retries = int(message.age.total_seconds() ** 0.5)
         if retries <= self.max_retries:
-            super().maybe_retry(service, message, exc)
+            super().maybe_retry(service=service, message=message, exc=exc)
         else:
             self.fail(message, exc)
 
@@ -139,19 +159,20 @@ class RetryWhen(RetryStrategy[P, CloudEventType]):
     def __init__(
         self,
         retry_when: Callable[[CloudEventType, Exception], bool],
-        **extra,
+        **extra: Any,
     ) -> None:
         super().__init__(**extra)
         self.retry_when = retry_when
 
     def maybe_retry(
         self,
+        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
     ) -> None:
         if self.retry_when(message, exc):
-            super().maybe_retry(service, message, exc)
+            super().maybe_retry(service=service, message=message, exc=exc)
         else:
             self.fail(message, exc)
 
@@ -178,8 +199,8 @@ class RetryMiddleware(Middleware[CloudEventType]):
         service: Service,
         consumer: Consumer,
         message: CloudEventType,
-        result: Any | None = None,
         exc: Exception | None = None,
+        **_: Any,
     ) -> None:
         if exc is None or isinstance(exc, (Retry, Fail, Skip)):
             return
@@ -188,4 +209,4 @@ class RetryMiddleware(Middleware[CloudEventType]):
             "retry_strategy",
             self.default_retry_strategy,
         )
-        retry_strategy.maybe_retry(service, message, exc)
+        retry_strategy.maybe_retry(service=service, message=message, exc=exc)

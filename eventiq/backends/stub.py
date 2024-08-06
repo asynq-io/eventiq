@@ -53,7 +53,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         self._connected = False
         self.wait_on_publish = wait_on_publish
 
-    def queue_factory(self):
+    def queue_factory(self) -> asyncio.Queue[StubMessage]:
         return asyncio.Queue(maxsize=self.queue_max_size)
 
     def get_info(self) -> dict[str, str]:
@@ -68,7 +68,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[StubMessage],
-    ):
+    ) -> None:
         queue = self.topics[self.format_topic(consumer.topic)]
         async with send_stream:
             while self._connected:
@@ -86,7 +86,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, asyncio.Event]:
         data = self._encode_message(message, encoder)
         headers = kwargs.get("headers", {})

@@ -71,7 +71,7 @@ class RedisBroker(
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
-    ):
+    ) -> None:
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
             async with send_stream:
@@ -90,7 +90,7 @@ class RedisBroker(
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         data = self._encode_message(message, encoder)
         await self.redis.publish(message.topic, data)
@@ -105,8 +105,10 @@ class RedisBroker(
             return self.decoder.decode(result, Result)
         return None
 
-    async def ack(self, raw_message: RedisRawMessage):
+    async def ack(self, raw_message: RedisRawMessage) -> None:
         pass
 
-    async def nack(self, raw_message: RedisRawMessage, delay: int | None = None):
+    async def nack(
+        self, raw_message: RedisRawMessage, delay: int | None = None
+    ) -> None:
         await self.redis.publish(raw_message["channel"], raw_message["data"])

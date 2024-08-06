@@ -31,7 +31,7 @@ TOPIC_PATTERN = re.compile(r"{\w+}")
 TOPIC_SPECIAL_CHARS = {"{", "}", "*", ">"}
 
 
-def utc_now():
+def utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
@@ -59,7 +59,7 @@ def get_safe_url(url: str) -> str:
     return parsed.geturl()
 
 
-def resolve_message_type_hint(func) -> type[Any] | None:
+def resolve_message_type_hint(func: Callable) -> type[Any] | None:
     try:
         return func.__annotations__["message"]
     except (AttributeError, KeyError):

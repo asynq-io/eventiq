@@ -116,7 +116,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> R:
         raise NotImplementedError
 
@@ -142,24 +142,24 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[Message],
-    ):
+    ) -> None:
         raise NotImplementedError
 
     def get_num_delivered(self, raw_message: Message) -> int | None:
-        return None
+        return getattr(raw_message, "num_delivered", None)
 
     @classmethod
     def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
         return cls(**settings.model_dump(), **kwargs)
 
     @classmethod
-    def _from_env(cls, **kwargs) -> Broker:
+    def _from_env(cls, **kwargs: Any) -> Broker:
         return cls.from_settings(cls.Settings(**kwargs))
 
     @classmethod
     def from_env(
         cls,
-        **kwargs,
+        **kwargs: Any,
     ) -> Broker:
         if cls == Broker:
             type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
@@ -178,7 +178,7 @@ class UrlBroker(Broker[Message, R], ABC):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.url = str(url)  # TODO: cast(str, url)?
+        self.url = str(url)
         self.connection_options = connection_options or {}
 
     def get_info(self) -> dict[str, Any]:

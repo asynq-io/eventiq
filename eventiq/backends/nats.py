@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from abc import ABC
 from datetime import timedelta, timezone
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Callable, NoReturn
 
 import anyio
 from nats.aio.client import Client
@@ -11,13 +10,16 @@ from nats.aio.msg import Msg as NatsMsg
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
 from nats.js.errors import KeyNotFoundError
-from pydantic import AnyUrl, UrlConstraints
+from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.results import Error, Ok, Result, ResultBackend
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float, utc_now
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
 
@@ -27,9 +29,8 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 
 class JetStreamSettings(NatsSettings):
-    fetch_timeout: int = 10
-    jetstream_options: dict[str, Any] = {}
-    kv_options: dict[str, Any] = {}
+    jetstream_options: dict[str, Any] = Field({})
+    kv_options: dict[str, Any] = Field({})
 
 
 if TYPE_CHECKING:
@@ -48,7 +49,6 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     protocol = "nats"
     WILDCARD_ONE = "*"
     WILDCARD_MANY = ">"
-    Settings = NatsSettings
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         for k in ("error", "closed", "reconnected", "disconnected"):
             self.connection_options.setdefault(f"{k}_cb", self._default_cb(k))
 
-    def _default_cb(self, message: str):
+    def _default_cb(self, message: str) -> Callable[[Exception], Awaitable[None]]:
         async def wrapped(error: Exception | None = None) -> None:
             self.logger.warning(message)
             if error:
@@ -108,21 +108,21 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         return {"queue": event_type.get_default_topic(), "bindingVersion": "0.1.0"}
 
     async def ack(self, raw_message: NatsMsg) -> None:
-        if not raw_message._ackd:
-            await raw_message.ack()
+        await raw_message.ack()
 
     async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
-        if not raw_message._ackd:
-            await raw_message.nak(delay=delay)
+        await raw_message.nak(delay=delay)
 
 
 class NatsBroker(AbstractNatsBroker[None]):
+    Settings = NatsSettings
+
     async def sender(
         self,
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
-    ):
+    ) -> None:
         subscription = await self.client.subscribe(
             subject=self.format_topic(consumer.topic),
             queue=f"{group}:{consumer.name}",
@@ -141,7 +141,7 @@ class NatsBroker(AbstractNatsBroker[None]):
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         data = self._encode_message(message, encoder)
         reply = kwargs.get("reply", "")
@@ -168,13 +168,11 @@ class JetStreamBroker(
     def __init__(
         self,
         *,
-        fetch_timeout: int = 10,
         jetstream_options: dict[str, Any] | None = None,
         kv_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.fetch_timeout = fetch_timeout
         self.jetstream_options = jetstream_options or {}
         self.js = JetStreamContext(self.client, **self.jetstream_options)
         self.kv_options = kv_options or {}
@@ -197,9 +195,8 @@ class JetStreamBroker(
             data = await self.kv.get(key)
             if data.value:
                 return self.decoder.decode(data.value, as_type=Result)
-            return None
         except KeyNotFoundError:
-            self.logger.warning(f"Key {key} not found")
+            self.logger.warning("Key %s not found", key)
 
     async def store_result(self, key: str, result: Ok | Error) -> None:
         await self.kv.put(key, self.encoder.encode(result))
@@ -208,7 +205,7 @@ class JetStreamBroker(
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> api.PubAck:
         encoder = encoder or self.encoder
         data = encoder.encode(message)
@@ -231,7 +228,7 @@ class JetStreamBroker(
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
-    ) -> None:
+    ) -> NoReturn:
         config = consumer.options.get("config", ConsumerConfig())
 
         if config.ack_wait is None:
@@ -250,15 +247,12 @@ class JetStreamBroker(
         try:
             async with send_stream:
                 while True:
-                    try:
-                        messages = await subscription.fetch(
-                            batch=batch,
-                            timeout=self.fetch_timeout,
-                        )
-                        for message in messages:
-                            await send_stream.send(message)
-                    except asyncio.TimeoutError:
-                        await asyncio.sleep(0.1)
+                    messages = await subscription.fetch(
+                        batch=batch,
+                        timeout=None,
+                    )
+                    for message in messages:
+                        await send_stream.send(message)
         finally:
             self.logger.info(
                 "Stopping sender for consumer %s. canceling %d messages",
@@ -271,7 +265,6 @@ class JetStreamBroker(
                     if consumer.dynamic:
                         await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
-            raise
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         date = raw_message.metadata.timestamp.replace(tzinfo=timezone.utc)

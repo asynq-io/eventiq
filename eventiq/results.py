@@ -32,7 +32,7 @@ class ResultBackend(Broker[Message, R], ABC):
         self,
         store_results: bool = False,
         store_exceptions: bool = False,
-        **extra,
+        **extra: Any,
     ) -> None:
         super().__init__(**extra)
         self.store_results = store_results

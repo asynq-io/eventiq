@@ -62,21 +62,19 @@ else:
                     function=import_string_validator,
                     serialization=serializer,
                 )
-            else:
-                return core_schema.no_info_before_validator_function(
-                    function=import_string_validator,
-                    schema=handler(source),
-                    serialization=serializer,
-                )
+            return core_schema.no_info_before_validator_function(
+                function=import_string_validator,
+                schema=handler(source),
+                serialization=serializer,
+            )
 
         @staticmethod
         def _serialize(v: Any) -> str:
             if isinstance(v, ModuleType):
                 return v.__name__
-            elif hasattr(v, "__module__") and hasattr(v, "__name__"):
+            if hasattr(v, "__module__") and hasattr(v, "__name__"):
                 return f"{v.__module__}:{v.__name__}"
-            else:
-                return v
+            return v
 
         def __repr__(self) -> str:
             return "ImportedType"

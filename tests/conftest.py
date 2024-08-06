@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,6 +8,7 @@ import pytest_asyncio
 from eventiq import CloudEvent, Consumer, GenericConsumer, Service
 from eventiq.backends.stub import StubBroker
 from eventiq.middleware import Middleware
+from eventiq.utils import utc_now
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -59,7 +59,8 @@ def generic_test_consumer(service) -> Consumer:
     class TestConsumer(GenericConsumer[CloudEvent]):
         name = generic_consumer_name
 
-        async def process(self, message: CloudEvent):
+        async def process(self, message: CloudEvent) -> int:
+            assert isinstance(message, CloudEvent)
             return 42
 
     return service.consumer_group.consumers[generic_consumer_name]
@@ -68,7 +69,7 @@ def generic_test_consumer(service) -> Consumer:
 @pytest.fixture()
 def ce() -> CloudEvent:
     return CloudEvent.new(
-        {"today": date.today().isoformat(), "arr": [1, "2", 3.0]},
+        {"today": utc_now().date().isoformat(), "arr": [1, "2", 3.0]},
         type="TestEvent",
         topic="test_topic",
     )

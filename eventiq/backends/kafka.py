@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio import move_on_after
-from pydantic import AnyUrl, UrlConstraints
+from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import UrlBroker
 from eventiq.exceptions import BrokerError
@@ -17,7 +17,7 @@ KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
 
 
 class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
-    consumer_options: dict[str, Any] = {}
+    consumer_options: dict[str, Any] = Field({})
 
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ConsumerRecord],
-    ):
+    ) -> None:
         subscriber = AIOKafkaConsumer(
             group_id=f"{group}:{consumer.name}",
             bootstrap_servers=self.url,
@@ -121,7 +121,7 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
     async def nack(self, raw_message: ConsumerRecord, delay: int | None = None) -> None:
         self._subcsribers.pop(id(raw_message), None)
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         if self._publisher:
             await self._publisher.stop()
 
@@ -132,13 +132,14 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
             raise BrokerError(msg)
         return self._publisher
 
-    async def connect(self):
+    async def connect(self) -> None:
         if self._publisher is None:
-            self._publisher = AIOKafkaProducer(
+            publisher = AIOKafkaProducer(
                 bootstrap_servers=self.url,
                 **self.connection_options,
             )
-            await self._publisher.start()
+            await publisher.start()
+            self._publisher = publisher
 
     async def publish(
         self,
@@ -149,7 +150,7 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         headers: dict[str, str] | None = None,
         timestamp_ms: int | None = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         data = self._encode_message(message, encoder)
         timestamp_ms = timestamp_ms or int(message.time.timestamp() * 1000)
         key = key or getattr(message, "key", str(message.id))

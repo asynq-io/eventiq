@@ -8,21 +8,23 @@ from eventiq.backends.rabbitmq import RabbitmqBroker
 from eventiq.backends.redis import RedisBroker
 from eventiq.broker import Broker
 
-backends = [
+backends = (
     (NatsBroker, "nats://loca;host:4444"),
     (JetStreamBroker, "nats://localhost:4444"),
     (KafkaBroker, "kafka://localhost:3333"),
     (RabbitmqBroker, "amqp://localhost:9191"),
     (RedisBroker, "redis://localhost:6379"),
-]
+)
 
 
-@pytest.mark.parametrize("broker,url", backends)
-def test_is_subclass(broker, url):
+@pytest.mark.parametrize("broker_url", backends)
+def test_is_subclass(broker_url):
+    broker, url = broker_url
     assert issubclass(broker, Broker)
 
 
-@pytest.mark.parametrize("broker,url", backends)
-def test_from_env(broker, url):
+@pytest.mark.parametrize("broker_url", backends)
+def test_from_env(broker_url):
+    broker, url = broker_url
     os.environ["BROKER_URL"] = url
     broker.from_env()

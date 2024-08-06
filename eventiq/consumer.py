@@ -106,7 +106,7 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)
         if "event_type" not in extra:
-            extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore
+            extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore[attr-defined]
         if "description" not in extra:
             extra["description"] = type(self).__doc__ or ""
 

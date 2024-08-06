@@ -69,7 +69,7 @@ def run(
                 "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'.",
             )
             return
-        logger.info(f"Watching for changes in: {reload}")
+        logger.info("Watching for changes in: %s", reload)
         target = _build_target_from_opts(
             service,
             log_level,
@@ -91,7 +91,7 @@ def run(
     if log_config:
         logging.config.fileConfig(log_config)
     instance = import_service(service)
-    logger.info(f"Running service: {service}...")
+    logger.info("Running service: %s", service)
     anyio.run(
         instance.run,
         True,
@@ -118,10 +118,10 @@ def send(
         "CloudEvent",
         help="Message type",
     ),
-):
+) -> None:
     svc = import_service(service)
 
-    async def connect_and_send(message) -> None:
+    async def connect_and_send(message: CloudEvent) -> None:
         await svc.broker.connect()
         try:
             await svc.publish(message)
@@ -144,7 +144,7 @@ def docs(
         "json",
         help="Output format. Valid options are 'yaml' and 'json'(default)",
     ),
-):
+) -> None:
     from eventiq.asyncapi import get_async_api_spec, save_async_api_to_file
 
     svc = import_service(service)

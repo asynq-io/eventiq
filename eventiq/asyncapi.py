@@ -48,7 +48,7 @@ def save_async_api_to_file(spec: BaseModel, path: Path, fmt: str) -> None:
             json.dump(data, f)
 
 
-def get_all_models_schema(service: Service):
+def get_all_models_schema(service: Service) -> Any:
     all_models: list[tuple[type[CloudEvent], Literal["validation"]]] = [
         (m.type, "validation") for m in service.publishes
     ]
@@ -67,7 +67,7 @@ def snake_case_to_title(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def get_tag_list(tags: dict[str, Tag], taggable: Iterable | None):
+def get_tag_list(tags: dict[str, Tag], taggable: Iterable | None) -> list[Tag]:
     tag_list = []
     for t in taggable or []:
         if t not in tags:
@@ -100,7 +100,7 @@ def generate_receive_operation(
     channels_params: dict[str, Any],
     spec: AsyncAPI,
     tags: dict[str, Tag],
-):
+) -> None:
     event_type: str = consumer.event_type.__name__
     channel_id = generate_channel_id(consumer.topic)
     params = get_topic_parameters(consumer.topic, consumer.parameters)
@@ -152,8 +152,8 @@ def generate_send_operation(
     broker: Broker,
     spec: AsyncAPI,
     channels_params: dict[str, dict[str, Any]],
-    tags,
-):
+    tags: dict[str, Tag],
+) -> None:
     for publishes in publish_list:
         event_type = publishes.type.__name__
         params = get_topic_parameters(publishes.topic, publishes.parameters)
@@ -191,7 +191,7 @@ def generate_send_operation(
             spec.channels[channel_id] = channel
 
 
-def populate_spec(service: Service, spec: AsyncAPI):
+def populate_spec(service: Service, spec: AsyncAPI) -> None:
     tags = {t["name"]: Tag.model_validate(t) for t in service.tags_metadata}
     channels_params: dict[str, dict[str, Parameter]] = defaultdict(dict)
     for consumer in service.consumers.values():
@@ -217,7 +217,6 @@ def populate_spec(service: Service, spec: AsyncAPI):
         channels_params,
         tags,
     )
-    return spec
 
 
 @functools.lru_cache

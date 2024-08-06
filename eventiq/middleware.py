@@ -11,10 +11,6 @@ if TYPE_CHECKING:
     from .service import Service
 
 
-class _Sentinel(Exception):
-    pass
-
-
 class Middleware(Generic[CloudEventType], LoggerMixin):
     """Base class for middlewares."""
 

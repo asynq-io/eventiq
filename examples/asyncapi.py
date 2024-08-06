@@ -26,7 +26,7 @@ class MyCommand(Command[int], topic="commands.run"):
 
 class SendMessageMiddleware(Middleware):
     async def after_service_start(self, *, service: Service):
-        self.logger.info(f"After service start, running with {broker}")
+        self.logger.info("After service start, running with %s", broker)
         await asyncio.sleep(5)
         for i in range(100):
             event = MyEvent.new(MyData(counter=i, info="default"), topic="test.topic")

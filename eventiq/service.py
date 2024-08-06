@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import signal
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
-from typing import TYPE_CHECKING, Any, Callable, Generic
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream
@@ -30,14 +30,14 @@ Lifespan = Callable[["Service"], AbstractAsyncContextManager[None]]
 
 
 @asynccontextmanager
-async def nullcontext(service: Service):
+async def nullcontext(_: Service) -> AsyncIterator[None]:
     yield
 
 
 class Service(Generic[Message, R], LoggerMixin):
     """Logical group of consumers. Provides group (queue) name and handles versioning."""
 
-    default_middlewares: list[Middleware] = []
+    default_middlewares: ClassVar[list[Middleware]] = []
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class Service(Generic[Message, R], LoggerMixin):
         tags_metadata: list[dict[str, Any]] | None = None,
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
-        **options,
+        **options: Any,
     ) -> None:
         self.broker = broker
         self.name = name
@@ -60,6 +60,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.description = description
         self.tags_metadata = tags_metadata or []
         self.consumer_group = ConsumerGroup()
+        self.subscribe = self.consumer_group.subscribe
         self.middlewares = self.default_middlewares
         if middlewares:
             self.middlewares.extend(middlewares)
@@ -72,15 +73,13 @@ class Service(Generic[Message, R], LoggerMixin):
         self.async_api_extra = async_api_extra or {}
         self.options = options
 
-    def add_middleware(self, middleware: type[Middleware], *args, **kwargs) -> None:
+    def add_middleware(
+        self, middleware: type[Middleware], *args: Any, **kwargs: Any
+    ) -> None:
         self.middlewares.append(middleware(*args, **kwargs))
 
     @property
-    def subscribe(self):
-        return self.consumer_group.subscribe
-
-    @property
-    def add_consumer_group(self):
+    def add_consumer_group(self) -> Callable[[ConsumerGroup], None]:
         return self.consumer_group.add_consumer_group
 
     @property
@@ -93,7 +92,7 @@ class Service(Generic[Message, R], LoggerMixin):
         type: type[CloudEvent] | str = CloudEvent,
         headers: dict[str, str] | None = None,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> R:
         if isinstance(type, str):
             kwargs["type"] = type
@@ -101,13 +100,13 @@ class Service(Generic[Message, R], LoggerMixin):
         ce = type.new(data, type=type, source=self.name, headers=headers, **kwargs)
         if headers:
             ce.headers.update(headers)
-        return await self.publish(ce)
+        return await self.publish(ce, encoder=encoder)
 
     async def publish(
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> R:
         if not message.source:
             message.source = self.name
@@ -117,17 +116,17 @@ class Service(Generic[Message, R], LoggerMixin):
         await self.dispatch_after("publish", message=message)
         return res
 
-    async def connect(self):
+    async def connect(self) -> None:
         await self.dispatch_before("broker_connect")
         await self.broker.connect()
         await self.dispatch_after("broker_connect")
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         await self.dispatch_before("broker_disconnect")
         await self.broker.disconnect()
         await self.dispatch_after("broker_disconnect")
 
-    async def start_consumers(self, tg: TaskGroup):
+    async def start_consumers(self, tg: TaskGroup) -> None:
         for consumer in self.consumers.values():
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
@@ -137,7 +136,7 @@ class Service(Generic[Message, R], LoggerMixin):
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
 
             for i in range(1, consumer.concurrency + 1):
-                self.logger.info(f"Starting consumer {consumer.name} task {i}")
+                self.logger.info("Starting consumer %s task %s", consumer.name, i)
                 tg.start_soon(
                     self.receiver,
                     consumer,
@@ -159,7 +158,7 @@ class Service(Generic[Message, R], LoggerMixin):
                     await self.disconnect()
 
     @asynccontextmanager
-    async def context(self):
+    async def context(self) -> AsyncIterator[None]:
         task = asyncio.create_task(self.run(enable_signal_handler=False))
         await asyncio.sleep(0)
         yield
@@ -170,7 +169,7 @@ class Service(Generic[Message, R], LoggerMixin):
     async def watch_for_signals(self, scope: CancelScope) -> None:
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
             async for signum in signals:
-                self.logger.info(f"Received signal {signum.name}")
+                self.logger.info("Received signal %s", signum.name)
                 scope.cancel()
 
     async def get_result(self, message_id: ID) -> Result | None:
@@ -179,7 +178,7 @@ class Service(Generic[Message, R], LoggerMixin):
             raise TypeError(msg)
         return await self.broker.get_result(f"{self.name}:{message_id}")
 
-    async def _dispatch(self, event: str, **kwargs) -> None:
+    async def _dispatch(self, event: str, **kwargs: Any) -> None:
         message = kwargs.get("message")
         for middleware in self.middlewares:
             if message and (
@@ -193,17 +192,17 @@ class Service(Generic[Message, R], LoggerMixin):
 
             await method(service=self, **kwargs)
 
-    async def dispatch_before(self, event: str, **kwargs) -> None:
+    async def dispatch_before(self, event: str, **kwargs: Any) -> None:
         await self._dispatch(f"before_{event}", **kwargs)
 
-    async def dispatch_after(self, event: str, **kwargs) -> None:
+    async def dispatch_after(self, event: str, **kwargs: Any) -> None:
         await self._dispatch(f"after_{event}", **kwargs)
 
     async def receiver(
         self,
         consumer: Consumer,
         receive_stream: MemoryObjectReceiveStream[Message],
-    ):
+    ) -> None:
         consumer_timeout = to_float(
             consumer.timeout or self.broker.default_consumer_timeout,
         )
@@ -257,7 +256,8 @@ class Service(Generic[Message, R], LoggerMixin):
             message.set_context(self, raw_message)
         except (DecodeError, ValidationError) as e:
             self.logger.exception(
-                f"Failed to validate message {raw_message}.",
+                "Failed to validate message %s.",
+                raw_message,
                 exc_info=e,
             )
             if self.broker.should_nack(raw_message):
@@ -277,7 +277,7 @@ class Service(Generic[Message, R], LoggerMixin):
                 message=message,
             )
             self.logger.info(
-                f"Running consumer {consumer.name} with message {message.id}",
+                "Running consumer %s with message %s", consumer.name, message.id
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
@@ -349,7 +349,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self,
         event_type: type[CloudEvent],
         auto_ack: bool = False,
-        **options,
+        **options: Any,
     ) -> AsyncIterator[
         MemoryObjectReceiveStream[tuple[CloudEvent, Callable[[], None]]]
     ]:

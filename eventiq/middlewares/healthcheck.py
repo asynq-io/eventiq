@@ -12,7 +12,7 @@ from eventiq.middleware import Middleware
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
-    from eventiq import Service
+    from eventiq import Broker, Service
 
 
 class HealthCheckMiddleware(Middleware):
@@ -33,8 +33,8 @@ class HealthCheckMiddleware(Middleware):
     async def after_broker_connect(self, *, service: Service) -> None:
         self._task = asyncio.create_task(self._run_forever(service.broker))
 
-    async def _run_forever(self, broker) -> None:
-        p = Path(os.path.join(self.BASE_DIR, "healthy"))
+    async def _run_forever(self, broker: Broker) -> None:
+        p = Path(self.BASE_DIR) / "healthy"
         p.touch(exist_ok=True)
         while True:
             try:
@@ -52,10 +52,10 @@ class HealthCheckMiddleware(Middleware):
                 unhealthy = True
 
             if unhealthy:
-                p.rename(os.path.join(self.BASE_DIR, "unhealthy"))
+                p.rename(Path(self.BASE_DIR) / "unhealthy")
             await asyncio.sleep(self.interval)
 
-    async def after_broker_disconnect(self, *, service: Service) -> None:
+    async def after_broker_disconnect(self, **_: Any) -> None:
         if self._task:
             self._task.cancel()
             self._task = None

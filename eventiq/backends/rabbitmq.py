@@ -98,7 +98,7 @@ class RabbitmqBroker(
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
-    ):
+    ) -> None:
         channel = await self.connection.channel()
         prefetch_count = consumer.concurrency * 2
         await channel.set_qos(prefetch_count=prefetch_count)
@@ -120,13 +120,12 @@ class RabbitmqBroker(
                 if consumer.dynamic:
                     await queue.unbind(self.exchange, routing_key=consumer.topic)
                 await channel.close()
-            raise
 
     async def publish(
         self,
         message: CloudEvent,
         encoder: Encoder | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> ConfirmationFrameType | None:
         data = self._encode_message(message, encoder=encoder)
         timeout = kwargs.get("timeout")

@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.fields import FieldInfo, _FieldInfoInputs
+from typing_extensions import Self
 
 from .types import Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
@@ -53,7 +54,7 @@ class CloudEvent(BaseModel, Generic[D]):
         topic: Optional[str] = None,
         validate_topic: bool = False,
         **kwargs: Any,
-    ):
+    ) -> None:
         if not abstract and topic:
             kw: _FieldInfoInputs = {
                 "alias": "subject",
@@ -102,10 +103,10 @@ class CloudEvent(BaseModel, Generic[D]):
 
     @field_validator("type", mode="before")
     @classmethod
-    def get_default_type(cls, value: Any):
+    def get_default_type(cls, value: Any) -> str:
         if value is None:
             return cls.__name__
-        return value
+        return str(value)
 
     @property
     def raw(self) -> Any:
@@ -131,7 +132,9 @@ class CloudEvent(BaseModel, Generic[D]):
         return super().model_dump(**kwargs)
 
     @classmethod
-    def new(cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any):
+    def new(
+        cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
+    ) -> Self:
         self = cls(data=obj, **kwargs)
         if headers:
             self._headers.update(headers)
@@ -164,7 +167,7 @@ class Publishes(BaseModel):
     asyncapi_extra: dict[str, Any] = {}
 
     @model_validator(mode="after")
-    def validate_topic(self):
+    def validate_topic(self) -> Self:
         if self.topic is None:
             topic = self.type.get_default_topic()
             if topic is None:
