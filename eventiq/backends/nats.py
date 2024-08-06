@@ -6,20 +6,17 @@ from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
-from anyio.streams.memory import MemoryObjectSendStream
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
 from nats.js.errors import KeyNotFoundError
-from nats.js.kv import KeyValue
 from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.results import Error, Ok, Result, ResultBackend
 from eventiq.settings import UrlBrokerSettings
-from eventiq.types import Encoder
 from eventiq.utils import to_float, utc_now
 
 NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
@@ -36,12 +33,15 @@ class JetStreamSettings(NatsSettings):
 
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+    from nats.js.kv import KeyValue
+
     from eventiq import CloudEvent, Consumer
+    from eventiq.types import Encoder
 
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
-    """
-    :param auto_flush: auto flush messages on publish
+    """:param auto_flush: auto flush messages on publish
     :param kwargs: options for base class
     """
 
@@ -64,20 +64,22 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
             self.connection_options.setdefault(f"{k}_cb", self._default_cb(k))
 
     def _default_cb(self, message: str):
-        async def wrapped(error: Exception | None = None):
+        async def wrapped(error: Exception | None = None) -> None:
             self.logger.warning(message)
             if error:
                 self.logger.exception("", exc_info=error)
+
+        return wrapped
 
     @staticmethod
     def get_message_metadata(raw_message: NatsMsg) -> dict[str, str]:
         try:
             return {
                 "messaging.nats.sequence.consumer": str(
-                    raw_message.metadata.sequence.consumer
+                    raw_message.metadata.sequence.consumer,
                 ),
                 "messaging.nats.sequence.stream": str(
-                    raw_message.metadata.sequence.stream
+                    raw_message.metadata.sequence.stream,
                 ),
                 "messaging.nats.num_delivered": str(raw_message.metadata.num_delivered),
             }
@@ -116,7 +118,10 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
 class NatsBroker(AbstractNatsBroker[None]):
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ):
         subscription = await self.client.subscribe(
             subject=self.format_topic(consumer.topic),
@@ -133,7 +138,10 @@ class NatsBroker(AbstractNatsBroker[None]):
             self.logger.info("Sender finished for %s", consumer.name)
 
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs,
     ) -> None:
         data = self._encode_message(message, encoder)
         reply = kwargs.get("reply", "")
@@ -145,14 +153,14 @@ class NatsBroker(AbstractNatsBroker[None]):
 
 
 class JetStreamBroker(
-    AbstractNatsBroker[api.PubAck], ResultBackend[NatsMsg, api.PubAck]
+    AbstractNatsBroker[api.PubAck],
+    ResultBackend[NatsMsg, api.PubAck],
 ):
-    """
-    NatsBroker with JetStream enabled
+    """NatsBroker with JetStream enabled
     :param prefetch_count: default number of messages to prefetch
     :param fetch_timeout: timeout for subscription pull
     :param jetstream_options: additional options passed to nc.jetstream(...)
-    :param kwargs: all other options for base classes NatsBroker, Broker
+    :param kwargs: all other options for base classes NatsBroker, Broker.
     """
 
     Settings = JetStreamSettings
@@ -180,7 +188,8 @@ class JetStreamBroker(
     @property
     def kv(self) -> KeyValue:
         if self._kv is None:
-            raise BrokerError("KeyVal not initialized")
+            msg = "KeyVal not initialized"
+            raise BrokerError(msg)
         return self._kv
 
     async def get_result(self, key: str) -> Result | None:
@@ -218,7 +227,10 @@ class JetStreamBroker(
         return response
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ) -> None:
         config = consumer.options.get("config", ConsumerConfig())
 
@@ -240,7 +252,8 @@ class JetStreamBroker(
                 while True:
                     try:
                         messages = await subscription.fetch(
-                            batch=batch, timeout=self.fetch_timeout
+                            batch=batch,
+                            timeout=self.fetch_timeout,
                         )
                         for message in messages:
                             await send_stream.send(message)

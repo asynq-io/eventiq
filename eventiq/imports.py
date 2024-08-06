@@ -4,7 +4,6 @@ import importlib
 from types import ModuleType
 from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
-from pydantic import GetCoreSchemaHandler
 from pydantic_core import PydanticCustomError, core_schema
 
 AnyType = TypeVar("AnyType")
@@ -16,7 +15,8 @@ def import_from_string(path: str) -> Any:
     try:
         return getattr(module, obj)
     except AttributeError:
-        raise ImportError(f"{module_name} has no object {obj}") from None
+        msg = f"{module_name} has no object {obj}"
+        raise ImportError(msg) from None
 
 
 def import_string_validator(value: Any) -> Any:
@@ -24,8 +24,11 @@ def import_string_validator(value: Any) -> Any:
         try:
             return import_from_string(value)
         except ImportError as e:
+            msg = "import_error"
             raise PydanticCustomError(
-                "import_error", "Invalid python path: {error}", {"error": str(e)}
+                msg,
+                "Invalid python path: {error}",
+                {"error": str(e)},
             ) from None
     else:
         # otherwise we just return the value and let the next validator do the rest of the work
@@ -33,6 +36,8 @@ def import_string_validator(value: Any) -> Any:
 
 
 if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler
+
     ImportedType = Annotated[AnyType, ...]
 else:
 
@@ -43,15 +48,19 @@ else:
 
         @classmethod
         def __get_pydantic_core_schema__(
-            cls, source: type[Any], handler: GetCoreSchemaHandler
+            cls,
+            source: type[Any],
+            handler: GetCoreSchemaHandler,
         ) -> core_schema.CoreSchema:
             serializer = core_schema.plain_serializer_function_ser_schema(
-                cls._serialize, when_used="json"
+                cls._serialize,
+                when_used="json",
             )
             if cls is source:
                 # Treat bare usage of ImportString (`schema is None`) as the same as ImportString[Any]
                 return core_schema.no_info_plain_validator_function(
-                    function=import_string_validator, serialization=serializer
+                    function=import_string_validator,
+                    serialization=serializer,
                 )
             else:
                 return core_schema.no_info_before_validator_function(

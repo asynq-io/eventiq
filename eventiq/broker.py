@@ -6,20 +6,21 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 from urllib.parse import urlparse
 
-from anyio.streams.memory import MemoryObjectSendStream
-from pydantic import AnyUrl
-
 from .decoder import DEFAULT_DECODER
 from .encoder import DEFAULT_ENCODER
 from .imports import import_from_string
 from .logging import LoggerMixin
-from .models import CloudEvent
 from .settings import BrokerSettings, UrlBrokerSettings
 from .types import Decoder, Encoder, Message, Timeout
 from .utils import format_topic, to_float
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+    from pydantic import AnyUrl
+
     from eventiq import Consumer
+
+    from .models import CloudEvent
 
 
 R = TypeVar("R", bound=Any)
@@ -31,7 +32,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     """Base broker class
     :param description: Broker (Server) Description
     :param encoder: Encoder (Serializer) class
-    :param decoder: Decoder (Deserializer) class
+    :param decoder: Decoder (Deserializer) class.
     """
 
     protocol: str
@@ -47,7 +48,8 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         if not inspect.isabstract(cls):
             protocol = getattr(cls, "protocol", None)
             if protocol is None:
-                raise ValueError(f"Broker subclass {cls} must define a protocol")
+                msg = f"Broker subclass {cls} must define a protocol"
+                raise ValueError(msg)
 
     def __init__(
         self,
@@ -72,7 +74,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         self.default_consumer_timeout = to_float(default_consumer_timeout)
         self.validate_error_delay = validate_error_delay
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return type(self).__name__
 
     def should_nack(self, raw_message: Message) -> bool:
@@ -86,7 +88,9 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         return format_topic(topic, self.WILDCARD_ONE, self.WILDCARD_MANY)
 
     def _encode_message(
-        self, message: CloudEvent, encoder: Encoder | None = None
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
     ) -> bytes:
         encoder = encoder or self.encoder
         message.content_type = encoder.CONTENT_TYPE
@@ -104,12 +108,15 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     @property
     @abstractmethod
     def is_connected(self) -> bool:
-        """Return broker connection status"""
+        """Return broker connection status."""
         raise NotImplementedError
 
     @abstractmethod
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs,
     ) -> R:
         raise NotImplementedError
 

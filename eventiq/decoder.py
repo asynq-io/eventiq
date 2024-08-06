@@ -15,7 +15,9 @@ class JsonDecoder:
         try:
             if as_type:
                 return as_type.model_validate_json(
-                    data, strict=self.strict, context=self.context
+                    data,
+                    strict=self.strict,
+                    context=self.context,
                 )
             return AnyType.validate_json(data, strict=self.strict, context=self.context)
         except Exception as e:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from pydantic import BaseModel
-from pydantic.main import IncEx
 from typing_extensions import Unpack
 
 from .exceptions import EncodeError
-from .types import Encoder
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+    from pydantic.main import IncEx
+
+    from .types import Encoder
 
 
 class Options(TypedDict, total=False):

@@ -3,11 +3,8 @@ from __future__ import annotations
 import functools
 import json
 from collections import defaultdict
-from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import models_json_schema
 from pydantic_asyncapi.common import Reference, Tag
@@ -22,16 +19,21 @@ from pydantic_asyncapi.v3 import (
     Server,
 )
 
-from eventiq.consumer import Consumer
-from eventiq.models import Publishes
-from eventiq.types import Parameter as ParamDict
 from eventiq.utils import TOPIC_PATTERN
 
 TOPIC_TRANSLATION = str.maketrans({"{": "", "}": "", ".": "_", "*": "all"})
 PREFIX = "#/components/schemas/"
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from pydantic import BaseModel
+
     from eventiq import Broker, CloudEvent, Service
+    from eventiq.consumer import Consumer
+    from eventiq.models import Publishes
+    from eventiq.types import Parameter as ParamDict
 
 
 def save_async_api_to_file(spec: BaseModel, path: Path, fmt: str) -> None:
@@ -80,7 +82,8 @@ def generate_channel_id(topic: str) -> str:
 
 
 def get_topic_parameters(
-    topic: str, parameters: dict[str, ParamDict]
+    topic: str,
+    parameters: dict[str, ParamDict],
 ) -> dict[str, Parameter]:
     result_params = {}
     for k in topic.split("."):
@@ -121,7 +124,7 @@ def generate_receive_operation(
         address=consumer.topic,
         servers=[Reference(ref=f"#/servers/{broker.name}")],
         messages={
-            event_type: Reference(ref=f"#/channels/{channel_id}/messages/{event_type}")
+            event_type: Reference(ref=f"#/channels/{channel_id}/messages/{event_type}"),
         },
         parameters=channels_params[channel_id],
         tags=get_tag_list(tags, consumer.tags),
@@ -178,7 +181,7 @@ def generate_send_operation(
                 address=publishes.topic,
                 servers=[Reference(ref=f"#/servers/{broker.name}")],
                 messages={
-                    event_type: Reference(ref=f"#/components/messages/{event_type}")
+                    event_type: Reference(ref=f"#/components/messages/{event_type}"),
                 },
                 parameters=channels_params[channel_id],
                 tags=get_tag_list(tags, publishes.tags),
@@ -193,14 +196,26 @@ def populate_spec(service: Service, spec: AsyncAPI):
     channels_params: dict[str, dict[str, Parameter]] = defaultdict(dict)
     for consumer in service.consumers.values():
         generate_send_operation(
-            consumer.publishes, service.broker, spec, channels_params, tags
+            consumer.publishes,
+            service.broker,
+            spec,
+            channels_params,
+            tags,
         )
         generate_receive_operation(
-            consumer, service.broker, channels_params, spec, tags
+            consumer,
+            service.broker,
+            channels_params,
+            spec,
+            tags,
         )
 
     generate_send_operation(
-        service.publishes, service.broker, spec, channels_params, tags
+        service.publishes,
+        service.broker,
+        spec,
+        channels_params,
+        tags,
     )
     return spec
 
@@ -211,7 +226,9 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
     spec = AsyncAPI(
         asyncapi="3.0.0",
         info=Info(
-            title=service.title, version=service.version, **service.async_api_extra
+            title=service.title,
+            version=service.version,
+            **service.async_api_extra,
         ),
         defaultContentType=service.broker.encoder.CONTENT_TYPE,
         servers={
@@ -219,7 +236,7 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
                 protocol=service.broker.protocol,
                 **service.broker.get_info(),
                 **service.broker.async_api_extra,
-            )
+            ),
         },
         components=Components(schemas=schemas),
     )

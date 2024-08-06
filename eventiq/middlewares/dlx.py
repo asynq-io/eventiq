@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from eventiq.exceptions import Fail
 from eventiq.middleware import CloudEventType, Middleware
 from eventiq.models import CloudEvent
 
 if TYPE_CHECKING:
     from eventiq import Consumer, Service
+    from eventiq.exceptions import Fail
 
 
 class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
@@ -32,6 +32,9 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
         exc: Fail,
     ) -> None:
         ce = self.event_class.new(
-            message, type_=self.type_, topic=self.topic, **self.kwargs
+            message,
+            type_=self.type_,
+            topic=self.topic,
+            **self.kwargs,
         )
         await service.publish(ce)

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
 
-from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker, UrlBrokerSettings
 from eventiq.exceptions import BrokerError
 from eventiq.results import Error, Ok, Result, ResultBackend
-from eventiq.types import Encoder
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
     from eventiq import CloudEvent, Consumer
+    from eventiq.types import Encoder
 
 RedisUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["redis", "rediss"])]
 
@@ -28,11 +29,11 @@ RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 
 class RedisBroker(
-    UrlBroker[RedisRawMessage, None], ResultBackend[RedisRawMessage, None]
+    UrlBroker[RedisRawMessage, None],
+    ResultBackend[RedisRawMessage, None],
 ):
-    """
-    Broker implementation based on redis PUB/SUB and aioredis package
-    :param kwargs: base class arguments
+    """Broker implementation based on redis PUB/SUB and aioredis package
+    :param kwargs: base class arguments.
     """
 
     Settings = UrlBrokerSettings[RedisUrl]
@@ -61,11 +62,15 @@ class RedisBroker(
     @property
     def redis(self) -> Redis:
         if self._redis is None:
-            raise BrokerError("Not connected")
+            msg = "Not connected"
+            raise BrokerError(msg)
         return self._redis
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ):
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
@@ -82,7 +87,10 @@ class RedisBroker(
         self._redis = Redis.from_url(self.url, **self.connection_options)
 
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs,
     ) -> None:
         data = self._encode_message(message, encoder)
         await self.redis.publish(message.topic, data)
@@ -95,6 +103,7 @@ class RedisBroker(
         result = await self.redis.get(key)
         if result:
             return self.decoder.decode(result, Result)
+        return None
 
     async def ack(self, raw_message: RedisRawMessage):
         pass

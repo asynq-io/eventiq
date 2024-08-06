@@ -7,10 +7,11 @@ from pydantic import BaseModel, RootModel
 
 from .broker import Broker, Message, R
 from .middleware import Middleware
-from .models import CloudEvent
 
 if TYPE_CHECKING:
     from eventiq import Consumer, Service
+
+    from .models import CloudEvent
 
 
 class Ok(BaseModel):
@@ -28,8 +29,11 @@ class Result(RootModel[Union[Ok, Error]]):
 
 class ResultBackend(Broker[Message, R], ABC):
     def __init__(
-        self, store_results: bool = False, store_exceptions: bool = False, **extra
-    ):
+        self,
+        store_results: bool = False,
+        store_exceptions: bool = False,
+        **extra,
+    ) -> None:
         super().__init__(**extra)
         self.store_results = store_results
         self.store_exceptions = store_exceptions
@@ -58,7 +62,8 @@ class ResultBackendMiddleware(Middleware):
         if isinstance(service.broker, ResultBackend) and service.broker.store_results:
             if exc is None:
                 await service.broker.store_result(
-                    f"{service.name}:{message.id}", Ok(data=result)
+                    f"{service.name}:{message.id}",
+                    Ok(data=result),
                 )
             elif service.broker.store_exceptions:
                 await service.broker.store_result(

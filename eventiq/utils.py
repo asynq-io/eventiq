@@ -5,13 +5,23 @@ import functools
 import re
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Literal, TypeVar, cast, get_type_hints, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Literal,
+    TypeVar,
+    cast,
+    get_type_hints,
+    overload,
+)
 from urllib.parse import urlparse
 
 from anyio import to_thread
 from typing_extensions import ParamSpec, TypeGuard
 
-from eventiq.types import Timeout
+if TYPE_CHECKING:
+    from eventiq.types import Timeout
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=Any)
@@ -40,8 +50,11 @@ def get_safe_url(url: str) -> str:
     if parsed.username and parsed.password:
         parsed = parsed._replace(
             netloc="{}:{}@{}:{}".format(
-                parsed.username or "", "*****", parsed.hostname, parsed.port
-            )
+                parsed.username or "",
+                "*****",
+                parsed.hostname,
+                parsed.port,
+            ),
         )
     return parsed.geturl()
 
@@ -97,7 +110,6 @@ def to_float(timeout: None) -> None: ...
 
 
 def to_float(timeout: Timeout | None) -> float | None:
-    # TODO: for some reason type narrowing doesnt work here
     if timeout is None:
         return None
     if isinstance(timeout, timedelta):

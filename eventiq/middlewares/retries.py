@@ -64,18 +64,24 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
         delay = max(delay, self.min_delay)
         if self.log_exceptions:
             self.logger.warning(
-                f"Will retry message {message.id} in %d seconds.", delay, exc_info=exc
+                f"Will retry message {message.id} in %d seconds.",
+                delay,
+                exc_info=exc,
             )
         raise Retry(delay=delay) from exc
 
     def fail(self, message: CloudEventType, exc: Exception) -> None:
         self.logger.exception(
-            f"Retry limit exceeded for message {message.id}", exc_info=exc
+            f"Retry limit exceeded for message {message.id}",
+            exc_info=exc,
         )
         raise Fail(reason="Retry limit exceeded") from exc
 
     def maybe_retry(
-        self, service: Service, message: CloudEventType, exc: Exception
+        self,
+        service: Service,
+        message: CloudEventType,
+        exc: Exception,
     ) -> None:
         if not (self.throws and isinstance(exc, self.throws)):
             self.retry(message, exc)
@@ -85,7 +91,9 @@ class RetryStrategy(Generic[P, CloudEventType], LoggerMixin):
 
 class MaxAge(RetryStrategy[P, CloudEventType]):
     def __init__(
-        self, max_age: timedelta | dict[str, Any] = timedelta(seconds=60), **extra
+        self,
+        max_age: timedelta | dict[str, Any] = timedelta(seconds=60),
+        **extra,
     ) -> None:
         super().__init__(**extra)
         if isinstance(max_age, Mapping):
@@ -93,7 +101,10 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
         self.max_age: timedelta = max_age
 
     def maybe_retry(
-        self, service: Service, message: CloudEventType, exc: Exception
+        self,
+        service: Service,
+        message: CloudEventType,
+        exc: Exception,
     ) -> None:
         if message.age <= self.max_age:
             super().maybe_retry(service, message, exc)
@@ -107,12 +118,15 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
         self.max_retries = max_retries
 
     def maybe_retry(
-        self, service: Service, message: CloudEventType, exc: Exception
+        self,
+        service: Service,
+        message: CloudEventType,
+        exc: Exception,
     ) -> None:
         retries = service.broker.get_num_delivered(message.raw)
         if retries is None:
             self.logger.warning(
-                "Retries property not found in message, backing off to message.age.seconds"
+                "Retries property not found in message, backing off to message.age.seconds",
             )
             retries = int(message.age.total_seconds() ** 0.5)
         if retries <= self.max_retries:
@@ -123,7 +137,9 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
 
 class RetryWhen(RetryStrategy[P, CloudEventType]):
     def __init__(
-        self, retry_when: Callable[[CloudEventType, Exception], bool], **extra
+        self,
+        retry_when: Callable[[CloudEventType, Exception], bool],
+        **extra,
     ) -> None:
         super().__init__(**extra)
         self.retry_when = retry_when
@@ -141,12 +157,11 @@ class RetryWhen(RetryStrategy[P, CloudEventType]):
 
 
 class RetryMiddleware(Middleware[CloudEventType]):
-    """
-    Retry Message Middleware.
+    """Retry Message Middleware.
     Supported retry strategies:
     - `MaxAge` (default) - retry with exponential backoff up to max_age
     - `MaxRetries` - retry up to N times (currently supported only by nats)
-    - `RetryWhen` - provide custom callable to determine weather message should be retried
+    - `RetryWhen` - provide custom callable to determine weather message should be retried.
     """
 
     def __init__(
@@ -170,6 +185,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
             return
 
         retry_strategy = consumer.options.get(
-            "retry_strategy", self.default_retry_strategy
+            "retry_strategy",
+            self.default_retry_strategy,
         )
         retry_strategy.maybe_retry(service, message, exc)

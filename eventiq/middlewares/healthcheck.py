@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Awaitable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -11,11 +10,13 @@ import anyio
 from eventiq.middleware import Middleware
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from eventiq import Service
 
 
 class HealthCheckMiddleware(Middleware):
-    """Middleware for performing basic health checks on broker"""
+    """Middleware for performing basic health checks on broker."""
 
     BASE_DIR = os.getenv("HEALTHCHECK_DIR", "/tmp")  # nosec
 

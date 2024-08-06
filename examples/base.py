@@ -17,7 +17,9 @@ class SendMessageMiddleware(Middleware):
 broker = JetStreamBroker(url="nats://localhost:4222")
 
 service = Service(
-    name="example-service", broker=broker, middlewares=[SendMessageMiddleware()]
+    name="example-service",
+    broker=broker,
+    middlewares=[SendMessageMiddleware()],
 )
 
 

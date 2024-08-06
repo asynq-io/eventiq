@@ -6,13 +6,11 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio import move_on_after
-from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
-from eventiq.types import Encoder
 from eventiq.utils import utc_now
 
 KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
@@ -23,14 +21,16 @@ class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
 
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
     from eventiq import CloudEvent, Consumer
+    from eventiq.types import Encoder
 
 
 class KafkaBroker(UrlBroker[ConsumerRecord, None]):
-    """
-    Kafka backend
+    """Kafka backend
     :param consumer_options: extra options (defaults) for AIOKafkaConsumer
-    :param kwargs: Broker base class parameters
+    :param kwargs: Broker base class parameters.
     """
 
     WILDCARD_MANY = "*"
@@ -112,9 +112,10 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
             await subscriber.commit(
                 {
                     TopicPartition(
-                        raw_message.topic, raw_message.partition
-                    ): raw_message.offset + 1
-                }
+                        raw_message.topic,
+                        raw_message.partition,
+                    ): raw_message.offset + 1,
+                },
             )
 
     async def nack(self, raw_message: ConsumerRecord, delay: int | None = None) -> None:
@@ -127,13 +128,15 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
     @property
     def publisher(self) -> AIOKafkaProducer:
         if self._publisher is None:
-            raise BrokerError("Broker not connected")
+            msg = "Broker not connected"
+            raise BrokerError(msg)
         return self._publisher
 
     async def connect(self):
         if self._publisher is None:
             self._publisher = AIOKafkaProducer(
-                bootstrap_servers=self.url, **self.connection_options
+                bootstrap_servers=self.url,
+                **self.connection_options,
             )
             await self._publisher.start()
 

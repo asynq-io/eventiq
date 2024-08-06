@@ -15,7 +15,6 @@ from typing import (
 from uuid import uuid4
 
 import anyio
-from anyio.streams.memory import MemoryObjectSendStream
 from typing_extensions import TypedDict, Unpack
 
 from .logging import get_logger
@@ -23,13 +22,15 @@ from .types import CloudEventType, Decoder, Parameter, Timeout
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
     from .models import Publishes
 
 Fn = Callable[[CloudEventType], Awaitable[Any]]
 
 
 class Consumer(ABC, Generic[CloudEventType]):
-    """Base consumer class"""
+    """Base consumer class."""
 
     def __init__(
         self,
@@ -49,12 +50,15 @@ class Consumer(ABC, Generic[CloudEventType]):
         **options: Any,
     ) -> None:
         if event_type is None:
-            raise ValueError("Event type is required")
+            msg = "Event type is required"
+            raise ValueError(msg)
         topic = topic or event_type.get_default_topic()
         if not topic:
-            raise ValueError("Topic is required")
+            msg = "Topic is required"
+            raise ValueError(msg)
         if concurrency < 1:
-            raise ValueError("Concurrency must be greater than 0")
+            msg = "Concurrency must be greater than 0"
+            raise ValueError(msg)
         self.name = name
         self.event_type = event_type
         self.topic = topic
@@ -187,12 +191,14 @@ class ConsumerGroup:
                 options["fn"] = func_or_cls
 
             elif isinstance(func_or_cls, type) and issubclass(
-                func_or_cls, GenericConsumer
+                func_or_cls,
+                GenericConsumer,
             ):
                 cls = func_or_cls
             else:
+                msg = f"Expected function or GenericConsumer got {type(func_or_cls)}"
                 raise TypeError(
-                    f"Expected function or GenericConsumer got {type(func_or_cls)}"
+                    msg,
                 )
             for k, v in self.options.items():
                 options.setdefault(k, v)

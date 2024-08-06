@@ -22,11 +22,13 @@ D = TypeVar("D", bound=Any)
 
 
 class CloudEvent(BaseModel, Generic[D]):
-    """Base Schema for all messages"""
+    """Base Schema for all messages."""
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
     content_type: str = Field(
-        "application/json", alias="datacontenttype", description="Message content type"
+        "application/json",
+        alias="datacontenttype",
+        description="Message content type",
     )
     id: UUID = Field(default_factory=uuid4, description="Event ID", repr=True)
     time: datetime = Field(default_factory=utc_now, description="Event created time")
@@ -52,34 +54,33 @@ class CloudEvent(BaseModel, Generic[D]):
         validate_topic: bool = False,
         **kwargs: Any,
     ):
-        if not abstract:
-            if topic:
-                kw: _FieldInfoInputs = {
-                    "alias": "subject",
-                    "description": "Message subject",
-                    "validate_default": True,
-                }
-                if any(k in topic for k in TOPIC_SPECIAL_CHARS):
-                    kw.update(
-                        {
-                            "annotation": str,
-                            "default": topic,
-                        }
-                    )
-                    if validate_topic:
-                        kw["pattern"] = get_topic_regex(topic)
-                else:
-                    kw.update(
-                        {
-                            "annotation": get_annotation(topic),
-                            "default": topic,
-                        }
-                    )
+        if not abstract and topic:
+            kw: _FieldInfoInputs = {
+                "alias": "subject",
+                "description": "Message subject",
+                "validate_default": True,
+            }
+            if any(k in topic for k in TOPIC_SPECIAL_CHARS):
+                kw.update(
+                    {
+                        "annotation": str,
+                        "default": topic,
+                    },
+                )
+                if validate_topic:
+                    kw["pattern"] = get_topic_regex(topic)
+            else:
+                kw.update(
+                    {
+                        "annotation": get_annotation(topic),
+                        "default": topic,
+                    },
+                )
 
-                cls.model_fields["topic"] = FieldInfo(**kw)
-            super().__init_subclass__(**kwargs)
+            cls.model_fields["topic"] = FieldInfo(**kw)
+        super().__init_subclass__(**kwargs)
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, CloudEvent):
             return False
         return self.id == other.id
@@ -109,13 +110,15 @@ class CloudEvent(BaseModel, Generic[D]):
     @property
     def raw(self) -> Any:
         if self._raw is None:
-            raise ValueError("raw property accessible only for incoming messages")
+            msg = "raw property accessible only for incoming messages"
+            raise ValueError(msg)
         return self._raw
 
     @property
     def service(self) -> "Service":
         if self._service is None:
-            raise ValueError("Service not set")
+            msg = "Service not set"
+            raise ValueError(msg)
         return self._service
 
     def set_context(self, service: "Service", raw: Any) -> None:
@@ -165,7 +168,8 @@ class Publishes(BaseModel):
         if self.topic is None:
             topic = self.type.get_default_topic()
             if topic is None:
-                raise ValueError("Topic is required")
+                msg = "Topic is required"
+                raise ValueError(msg)
             self.topic = topic
         return self
 

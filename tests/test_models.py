@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from eventiq import CloudEvent
 
 
-@pytest.fixture
+@pytest.fixture()
 def test_event_cls():
     class TestEvent(CloudEvent[str], topic="events.{type}", validate_topic=True):
         pass
@@ -12,7 +12,7 @@ def test_event_cls():
     return TestEvent
 
 
-@pytest.fixture
+@pytest.fixture()
 def test_command_cls():
     class TestCommand(CloudEvent[str], topic="commands.command_a"):
         pass
@@ -25,7 +25,8 @@ def test_get_default_topic(test_event_cls):
 
 
 @pytest.mark.parametrize(
-    "topic", ["some_random_string", "events.type.subtype", "events."]
+    "topic",
+    ["some_random_string", "events.type.subtype", "events."],
 )
 def test_event_incorrect_topic(test_event_cls, topic):
     with pytest.raises(ValidationError):
@@ -38,7 +39,8 @@ def test_correct_topic(test_event_cls, topic):
 
 
 @pytest.mark.parametrize(
-    "topic", ["some_random_string", "events.type.subtype", "events."]
+    "topic",
+    ["some_random_string", "events.type.subtype", "events."],
 )
 def test_command_incorrect_topic(test_command_cls, topic):
     with pytest.raises(ValidationError):
@@ -54,17 +56,23 @@ def test_untyped_model():
     class UserEvent(CloudEvent): ...
 
     u1 = UserEvent.new(
-        {"name": "John"}, type="UserCreated", topic="events.users.created"
+        {"name": "John"},
+        type="UserCreated",
+        topic="events.users.created",
     )
     assert isinstance(u1, UserEvent)
     assert u1.type == "UserCreated"
     u2 = UserEvent.new(
-        {"name": "John"}, type="UserUpdated", topic="events.users.updated"
+        {"name": "John"},
+        type="UserUpdated",
+        topic="events.users.updated",
     )
     assert u2.type == "UserUpdated"
     assert isinstance(u2, UserEvent)
     u3 = UserEvent.new(
-        {"name": "John"}, type="UserDeleted", topic="events.users.deleted"
+        {"name": "John"},
+        type="UserDeleted",
+        topic="events.users.deleted",
     )
     assert isinstance(u3, UserEvent)
     assert u3.type == "UserDeleted"
