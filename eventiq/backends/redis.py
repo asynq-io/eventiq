@@ -7,7 +7,7 @@ from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker, UrlBrokerSettings
 from eventiq.exceptions import BrokerError
-from eventiq.results import Error, Ok, Result, ResultBackend
+from eventiq.results import AnyModel, ResultBackend
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
@@ -62,8 +62,8 @@ class RedisBroker(
     @property
     def redis(self) -> Redis:
         if self._redis is None:
-            msg = "Not connected"
-            raise BrokerError(msg)
+            err = "Not connected"
+            raise BrokerError(err)
         return self._redis
 
     async def sender(
@@ -81,10 +81,12 @@ class RedisBroker(
                         await send_stream.send(message)
 
     async def disconnect(self) -> None:
-        await self.redis.close()
+        if self._redis:
+            await self._redis.close()
 
     async def connect(self) -> None:
-        self._redis = Redis.from_url(self.url, **self.connection_options)
+        if self._redis is None:
+            self._redis = Redis.from_url(self.url, **self.connection_options)
 
     async def publish(
         self,
@@ -95,14 +97,14 @@ class RedisBroker(
         data = self._encode_message(message, encoder)
         await self.redis.publish(message.topic, data)
 
-    async def store_result(self, key: str, result: Ok | Error) -> None:
+    async def store_result(self, key: str, result: AnyModel) -> None:
         data = self.encoder.encode(result)
         await self.redis.set(key, data)
 
-    async def get_result(self, key: str) -> Result | None:
+    async def get_result(self, key: str) -> Any:
         result = await self.redis.get(key)
         if result:
-            return self.decoder.decode(result, Result)
+            return self.decoder.decode(result)
         return None
 
     async def ack(self, raw_message: RedisRawMessage) -> None:

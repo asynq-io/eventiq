@@ -167,5 +167,22 @@ class RabbitmqBroker(
         return raw_message.body
 
     @staticmethod
+    def get_message_headers(raw_message: AbstractIncomingMessage) -> dict[str, str]:
+        return {k: str(v) for k, v in raw_message.headers.items()}
+
+    @staticmethod
     def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:
-        return {}
+        d = {
+            k: getattr(raw_message, k, None)
+            for k in (
+                "cluster_id",
+                "consumer_tag",
+                "redelivered",
+                "message_count",
+                "routing_key",
+                "exchange",
+            )
+        }
+        return {
+            f"messaging.rabbitmq.{k}": str(v) for k, v in d.items() if v is not None
+        }

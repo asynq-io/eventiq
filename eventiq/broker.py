@@ -80,10 +80,6 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     def should_nack(self, raw_message: Message) -> bool:
         return False
 
-    @staticmethod
-    def get_message_metadata(raw_message: Message) -> dict[str, str]:
-        return {}
-
     def format_topic(self, topic: str) -> str:
         return format_topic(topic, self.WILDCARD_ONE, self.WILDCARD_MANY)
 
@@ -99,6 +95,14 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     @abstractmethod
     def get_info(self) -> dict[str, Any]:
         raise NotImplementedError
+
+    @staticmethod
+    def get_message_headers(raw_message: Message) -> dict[str, str]:
+        return {}
+
+    @staticmethod
+    def get_message_metadata(raw_message: Message) -> dict[str, str]:
+        return {}
 
     @staticmethod
     @abstractmethod

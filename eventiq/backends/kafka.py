@@ -66,6 +66,10 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
             metadata["messaging.kafka.message.key"] = str(raw_message.key)
         return metadata
 
+    @staticmethod
+    def get_message_headers(raw_message: ConsumerRecord) -> dict[str, str]:
+        return {k: str(v) for k, v in raw_message.headers}
+
     @property
     def is_connected(self) -> bool:
         return True

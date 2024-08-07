@@ -14,7 +14,7 @@ from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
-from eventiq.results import Error, Ok, Result, ResultBackend
+from eventiq.results import AnyModel, ResultBackend
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float, utc_now
 
@@ -72,6 +72,10 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         return wrapped
 
     @staticmethod
+    def get_message_data(raw_message: NatsMsg) -> bytes:
+        return raw_message.data
+
+    @staticmethod
     def get_message_metadata(raw_message: NatsMsg) -> dict[str, str]:
         try:
             return {
@@ -86,6 +90,10 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         except Exception:
             return {}
 
+    @staticmethod
+    def get_message_headers(raw_message: NatsMsg) -> dict[str, str]:
+        return raw_message.headers or {}
+
     async def connect(self) -> None:
         if not self.client.is_connected:
             await self.client.connect(self.url, **self.connection_options)
@@ -99,10 +107,6 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     @property
     def is_connected(self) -> bool:
         return self.client.is_connected
-
-    @staticmethod
-    def get_message_data(raw_message: NatsMsg) -> bytes:
-        return raw_message.data
 
     def get_asyncapi_bindings(self, event_type: type[CloudEvent]) -> dict[str, Any]:
         return {"queue": event_type.get_default_topic(), "bindingVersion": "0.1.0"}
@@ -180,25 +184,26 @@ class JetStreamBroker(
 
     async def connect(self) -> None:
         await super().connect()
-        if self.store_results:
-            self._kv = await self.js.create_key_value(**self.kv_options)
+
+    async def init_storage(self) -> None:
+        self._kv = await self.js.create_key_value(**self.kv_options)
 
     @property
     def kv(self) -> KeyValue:
         if self._kv is None:
-            msg = "KeyVal not initialized"
-            raise BrokerError(msg)
+            err = "KeyVal not initialized"
+            raise BrokerError(err)
         return self._kv
 
-    async def get_result(self, key: str) -> Result | None:
+    async def get_result(self, key: str) -> Any:
         try:
             data = await self.kv.get(key)
             if data.value:
-                return self.decoder.decode(data.value, as_type=Result)
+                return self.decoder.decode(data.value)
         except KeyNotFoundError:
             self.logger.warning("Key %s not found", key)
 
-    async def store_result(self, key: str, result: Ok | Error) -> None:
+    async def store_result(self, key: str, result: AnyModel) -> None:
         await self.kv.put(key, self.encoder.encode(result))
 
     async def publish(
@@ -235,7 +240,9 @@ class JetStreamBroker(
             ack_wait = (
                 to_float(consumer.timeout) or self.default_consumer_timeout
             ) + 30
-            config.ack_wait = ack_wait  # consumer timeout + 30s for .ack()
+            config.ack_wait = (
+                ack_wait  # consumer timeout + 30s for any middleware/ack code
+            )
         batch = consumer.options.get("batch", consumer.concurrency * 2)
 
         subscription = await self.js.pull_subscribe(
@@ -254,16 +261,14 @@ class JetStreamBroker(
                     for message in messages:
                         await send_stream.send(message)
         finally:
-            self.logger.info(
-                "Stopping sender for consumer %s. canceling %d messages",
-                consumer.name,
-                len(messages),
-            )
+            self.logger.info("Stopping sender for consumer %s", consumer.name)
+            if messages:
+                self.logger.info("Rejecting %d messages", len(messages))
             with anyio.move_on_after(2, shield=True):
                 for message in messages:
                     await self.nack(message)
-                    if consumer.dynamic:
-                        await subscription.unsubscribe()
+                if consumer.dynamic:
+                    await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:

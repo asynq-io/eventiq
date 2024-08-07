@@ -122,9 +122,12 @@ class CloudEvent(BaseModel, Generic[D]):
             raise ValueError(msg)
         return self._service
 
-    def set_context(self, service: "Service", raw: Any) -> None:
+    def set_context(
+        self, service: "Service", raw: Any, headers: dict[str, str]
+    ) -> None:
         self._service = service
         self._raw = raw
+        self._headers = headers
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("by_alias", True)

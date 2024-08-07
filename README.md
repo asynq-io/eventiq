@@ -108,34 +108,6 @@ Run with
 eventiq run app:service --log-level=info
 ```
 
-## Dependency Injection
-
-```python
-@asynccontextmanager
-async def lifespan(service: Service) -> AsyncIterator[State]:
-    # setup dependencies, connect to db, etc
-    yield {
-        MyDependency: MyDependency()
-    }
-    # cleanup
-
-class MyDependency:
-    def inc(self, x: int) -> int:
-        return x + 1
-
-service = Service(
-    name="example-service",
-    broker=broker,
-    lifespan=lifespan
-)
-
-@service.subscribe(topic="test.topic", concurrency=10)
-async def example_run(message: CloudEvent, dependency = Provide(MyDependency)):
-    print(f"Received Message {message.id} with data: {message.data}")
-    assert isinstance(dependency, MyDependency)
-    assert dependency.inc(2) == 3
-```
-
 ## Watching for changes
 
 ```shell

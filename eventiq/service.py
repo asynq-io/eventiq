@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import signal
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic, Optional, Protocol
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream
 from pydantic import ValidationError
-from typing_extensions import ParamSpec
 
 from .broker import Broker, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
-from .types import Decoder, Encoder, Message, State
+from .types import Decoder, Encoder, Lifespan, Message, MiddlewareType, P
 from .utils import to_float
 
 if TYPE_CHECKING:
@@ -24,16 +23,6 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectReceiveStream
 
     from .middleware import Middleware
-
-Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
-
-P = ParamSpec("P")
-
-
-class MiddlewareType(Protocol[P]):
-    def __call__(
-        self, service: Service, *args: P.args, **kwargs: P.kwargs
-    ) -> Middleware: ...
 
 
 @asynccontextmanager
@@ -226,13 +215,12 @@ class Service(Generic[Message, R], LoggerMixin):
         decoder = consumer.decoder or self.broker.decoder
         async with receive_stream:
             async for raw_message in receive_stream:
-                with anyio.CancelScope(shield=True):
-                    await self._process(
-                        consumer,
-                        raw_message,
-                        decoder,
-                        consumer_timeout,
-                    )
+                await self._process(
+                    consumer,
+                    raw_message,
+                    decoder,
+                    consumer_timeout,
+                )
 
     async def ack(self, consumer: Consumer, message: Message) -> None:
         await self.dispatch_before("ack", consumer=consumer, raw_message=message)
@@ -269,8 +257,9 @@ class Service(Generic[Message, R], LoggerMixin):
 
         try:
             data = self.broker.get_message_data(raw_message)
+            headers = self.broker.get_message_headers(raw_message)
             message = decoder.decode(data, consumer.event_type)
-            message.set_context(self, raw_message)
+            message.set_context(self, raw_message, headers)
         except (DecodeError, ValidationError) as e:
             self.logger.exception(
                 "Failed to validate message %s.",
@@ -298,12 +287,12 @@ class Service(Generic[Message, R], LoggerMixin):
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
+        except Exception as e:
+            exc = e
         except anyio.get_cancelled_exc_class():
             with anyio.fail_after(1):
                 await self.nack(consumer, raw_message)
             raise
-        except Exception as e:
-            exc = e
         await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(

@@ -63,6 +63,10 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
     def get_message_data(raw_message: StubMessage) -> bytes:
         return raw_message.data
 
+    @staticmethod
+    def get_message_headers(raw_message: StubMessage) -> dict[str, str]:
+        return raw_message.headers
+
     async def sender(
         self,
         group: str,
@@ -89,13 +93,14 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         **kwargs: Any,
     ) -> dict[str, asyncio.Event]:
         data = self._encode_message(message, encoder)
-        headers = kwargs.get("headers", {})
         response = {}
         message_topic = self.format_topic(message.topic)
         for topic, queue in self.topics.items():
             if re.fullmatch(message_topic, topic):
                 event = asyncio.Event()
-                msg = StubMessage(data=data, queue=queue, event=event, headers=headers)
+                msg = StubMessage(
+                    data=data, queue=queue, event=event, headers=message.headers
+                )
                 await queue.put(msg)
                 response[topic] = event
                 if self.wait_on_publish:

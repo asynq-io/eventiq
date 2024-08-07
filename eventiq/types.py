@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Protocol,
     TypeVar,
     Union,
@@ -11,10 +15,12 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel, TypeAdapter
-from typing_extensions import TypedDict
+from typing_extensions import ParamSpec, TypedDict
 
 if TYPE_CHECKING:
+    from .middleware import Middleware
     from .models import CloudEvent
+    from .service import Service
 
 ID = Union[UUID, str]
 
@@ -28,6 +34,17 @@ RawData = Union[str, bytes, bytearray]
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 AnyType: TypeAdapter = TypeAdapter(Any)
 State = dict[Union[type, str], Any]
+
+
+Lifespan = Callable[["Service"], AbstractAsyncContextManager[State | None]]
+
+P = ParamSpec("P")
+
+
+class MiddlewareType(Protocol[P]):
+    def __call__(
+        self, service: Service, *args: P.args, **kwargs: P.kwargs
+    ) -> Middleware: ...
 
 
 @runtime_checkable

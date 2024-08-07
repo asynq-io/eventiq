@@ -87,7 +87,7 @@ def ce(service) -> CloudEvent:
         type="TestEvent",
         topic="test_topic",
     )
-    ce_.set_context(service, None)
+    ce_.set_context(service, None, {})
     return ce_
 
 
