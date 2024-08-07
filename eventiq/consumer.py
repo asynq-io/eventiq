@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -14,16 +15,17 @@ from typing import (
 from uuid import uuid4
 
 import anyio
-from typing_extensions import Concatenate, TypedDict, Unpack
+from typing_extensions import Concatenate, ParamSpec, TypedDict, Unpack
 
 from .dependencies import resolved_func
 from .logging import get_logger
-from .types import CloudEventType, Decoder, Fn, Parameter, Timeout
+from .types import CloudEventType, Decoder, Parameter, Timeout
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
+P = ParamSpec("P")
 
+
+if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
     from .models import Publishes
@@ -83,11 +85,11 @@ class Consumer(ABC, Generic[CloudEventType]):
             raise NotImplementedError
 
 
-class FnConsumer(Consumer[CloudEventType]):
+class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
     def __init__(
         self,
         *,
-        fn: Fn,
+        fn: Callable[Concatenate[CloudEventType, P], Awaitable[Any]],
         **extra: Any,
     ) -> None:
         if "name" not in extra:
@@ -101,8 +103,10 @@ class FnConsumer(Consumer[CloudEventType]):
         self.fn = resolved_func(fn)
         super().__init__(**extra)
 
-    async def process(self, message: CloudEventType) -> Any:
-        return await self.fn(message)
+    async def process(
+        self, message: CloudEventType, *args: P.args, **kwargs: P.kwargs
+    ) -> Any:
+        return await self.fn(message, *args, **kwargs)
 
 
 class GenericConsumer(Consumer[CloudEventType], ABC):
@@ -137,7 +141,9 @@ class ChannelConsumer(Consumer[CloudEventType]):
             await event.wait()
 
 
-MessageHandlerT = Union[type[GenericConsumer], Fn]
+MessageHandler = Union[
+    type[GenericConsumer], Callable[Concatenate[CloudEventType, P], Awaitable[Any]]
+]
 
 
 class ConsumerGroupOptions(TypedDict, total=False):
@@ -169,28 +175,28 @@ class ConsumerGroup:
         self.consumers.update(other.consumers)
 
     @overload
-    def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT: ...
+    def subscribe(self, func_or_cls: MessageHandler) -> MessageHandler: ...
 
     @overload
     def subscribe(
         self,
         func_or_cls: None = None,
         **options: Unpack[ConsumerOptions],
-    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
+    ) -> Callable[[MessageHandler], MessageHandler]: ...
 
     @overload
     def subscribe(
         self,
         func_or_cls: None = None,
         **options: Any,
-    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
+    ) -> Callable[[MessageHandler], MessageHandler]: ...
 
     def subscribe(
         self,
-        func_or_cls: MessageHandlerT | None = None,
+        func_or_cls: MessageHandler | None = None,
         **options: Any,
-    ) -> MessageHandlerT | Callable[[MessageHandlerT], MessageHandlerT]:
-        def decorator(func_or_cls: MessageHandlerT) -> MessageHandlerT:
+    ) -> MessageHandler | Callable[[MessageHandler], MessageHandler]:
+        def decorator(func_or_cls: MessageHandler) -> MessageHandler:
             cls: type[Consumer] = FnConsumer
             if inspect.isfunction(func_or_cls):
                 options["fn"] = func_or_cls

@@ -1,9 +1,7 @@
-from collections.abc import Awaitable
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Protocol,
     TypeVar,
     Union,
@@ -13,7 +11,7 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel, TypeAdapter
-from typing_extensions import Concatenate, TypedDict
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from .models import CloudEvent
@@ -30,8 +28,6 @@ RawData = Union[str, bytes, bytearray]
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 AnyType: TypeAdapter = TypeAdapter(Any)
 State = dict[Union[type, str], Any]
-
-Fn = Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
 
 
 @runtime_checkable

@@ -4,7 +4,7 @@ import functools
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
-from typing_extensions import Concatenate
+from typing_extensions import Concatenate, ParamSpec
 
 from .exceptions import DependencyError
 
@@ -13,10 +13,12 @@ if TYPE_CHECKING:
 
     from .types import CloudEventType
 
+P = ParamSpec("P")
+
 
 def resolved_func(
-    func: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]],
-) -> Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]:
+    func: Callable[Concatenate[CloudEventType, P], Awaitable[Any]],
+) -> Callable[Concatenate[CloudEventType, P], Awaitable[Any]]:
     signature = inspect.signature(func)
     params = {
         k: (v.annotation, v.default)
@@ -30,7 +32,9 @@ def resolved_func(
         return func
 
     @functools.wraps(func)
-    async def wrapped(message: CloudEventType, **kwargs: Any) -> Any:
+    async def wrapped(
+        message: CloudEventType, *args: P.args, **kwargs: P.kwargs
+    ) -> Any:
         state = message.service.state
 
         for k, v in params.items():
@@ -41,6 +45,6 @@ def resolved_func(
                 err = f"Missing dependency {k}: {annotation}"
                 raise DependencyError(err)
 
-        return await func(message, **kwargs)
+        return await func(message, *args, **kwargs)
 
     return wrapped
