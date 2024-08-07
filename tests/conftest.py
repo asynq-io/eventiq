@@ -93,8 +93,9 @@ def ce(service) -> CloudEvent:
 
 @pytest.fixture()
 def mock_consumer():
-    temp_mock = AsyncMock()
-    mock = MagicMock(return_value=temp_mock())
+    # this is workaround for inspect.getsignature() of AsyncMock
+    # https://github.com/python/cpython/issues/96127
+    mock = MagicMock(return_value=AsyncMock())
     mock.__annotations__ = {"message": CloudEvent, "return": None}
     mock.__name__ = "mock_consumer"
     return mock
