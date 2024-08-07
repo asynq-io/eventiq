@@ -65,7 +65,9 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         for k in ("error", "closed", "reconnected", "disconnected"):
             self.connection_options.setdefault(f"{k}_cb", self._default_cb(k))
 
-    def _default_cb(self, message: str) -> Callable[[Exception], Awaitable[None]]:
+    def _default_cb(
+        self, message: str
+    ) -> Callable[[Exception | None], Awaitable[None]]:
         async def wrapped(error: Exception | None = None) -> None:
             self.logger.warning(message)
             if error:
