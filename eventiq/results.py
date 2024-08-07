@@ -1,67 +1,57 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, RootModel
+from pydantic import RootModel
 
 from .broker import Broker, Message, R
 from .middleware import Middleware
-from .models import CloudEvent
 
 if TYPE_CHECKING:
     from eventiq import Consumer, Service
 
-
-class Ok(BaseModel):
-    data: Any
+    from .models import CloudEvent
 
 
-class Error(BaseModel):
-    type: str
-    detail: str
-
-
-class Result(RootModel[Union[Ok, Error]]):
+class AnyModel(RootModel[Any]):
     pass
 
 
 class ResultBackend(Broker[Message, R], ABC):
-    def __init__(
-        self, store_results: bool = False, store_exceptions: bool = False, **extra
-    ):
-        super().__init__(**extra)
-        self.store_results = store_results
-        self.store_exceptions = store_exceptions
+    async def init_storage(self) -> None:
+        pass
 
     @abstractmethod
-    async def store_result(self, key: str, result: Ok | Error) -> None:
+    async def store_result(self, key: str, result: AnyModel) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    async def get_result(self, key: str) -> Result | None:
+    async def get_result(self, key: str) -> AnyModel | None:
         raise NotImplementedError
 
 
 class ResultBackendMiddleware(Middleware):
+    def __init__(self, service: Service) -> None:
+        super().__init__(service)
+        if not isinstance(service.broker, ResultBackend):
+            err = f"Broker type must be ResultBackend. Got {type(service.broker).__name__}"
+            raise TypeError(err)
+
+        self.result_backend: ResultBackend = service.broker
+
     async def after_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEvent,
         result: Any | None = None,
         exc: Exception | None = None,
     ) -> None:
-        if not consumer.options.get("store_results"):
+        if not all([result, exc is None, consumer.options.get("store_results")]):
             return
-        if isinstance(service.broker, ResultBackend) and service.broker.store_results:
-            if exc is None:
-                await service.broker.store_result(
-                    f"{service.name}:{message.id}", Ok(data=result)
-                )
-            elif service.broker.store_exceptions:
-                await service.broker.store_result(
-                    f"{service.name}:{message.id}",
-                    Error(type=type(exc).__name__, detail=str(exc)),
-                )
+
+        await self.result_backend.store_result(
+            f"{self.service.name}:{message.id}",
+            AnyModel(result),
+        )

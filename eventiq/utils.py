@@ -1,25 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 import re
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Literal, TypeVar, cast, get_type_hints, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Literal,
+    TypeVar,
+    cast,
+    get_type_hints,
+    overload,
+)
 from urllib.parse import urlparse
 
 from anyio import to_thread
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeGuard
 
-from eventiq.types import Timeout
+if TYPE_CHECKING:
+    from eventiq.types import Timeout
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=Any)
+
 
 TOPIC_PATTERN = re.compile(r"{\w+}")
 TOPIC_SPECIAL_CHARS = {"{", "}", "*", ">"}
 
 
-def utc_now():
+def utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
@@ -38,13 +50,16 @@ def get_safe_url(url: str) -> str:
     if parsed.username and parsed.password:
         parsed = parsed._replace(
             netloc="{}:{}@{}:{}".format(
-                parsed.username or "", "*****", parsed.hostname, parsed.port
-            )
+                parsed.username or "",
+                "*****",
+                parsed.hostname,
+                parsed.port,
+            ),
         )
     return parsed.geturl()
 
 
-def resolve_message_type_hint(func) -> type[Any] | None:
+def resolve_message_type_hint(func: Callable) -> type[Any] | None:
     try:
         return func.__annotations__["message"]
     except (AttributeError, KeyError):
@@ -91,11 +106,10 @@ def to_float(timeout: Timeout) -> float: ...
 
 
 @overload
-def to_float(timeout: Timeout | None) -> float | None: ...
+def to_float(timeout: None) -> None: ...
 
 
 def to_float(timeout: Timeout | None) -> float | None:
-    # TODO: for some reason type narrowing doesnt work here
     if timeout is None:
         return None
     if isinstance(timeout, timedelta):
@@ -105,3 +119,26 @@ def to_float(timeout: Timeout | None) -> float | None:
 
 def get_annotation(value: str) -> type:
     return cast(type, Literal[value])
+
+
+T = TypeVar("T")
+
+
+AwaitableCallable = Callable[..., Awaitable[T]]
+
+
+@overload
+def is_async_callable(obj: AwaitableCallable[T]) -> TypeGuard[AwaitableCallable[T]]: ...
+
+
+@overload
+def is_async_callable(obj: Any) -> TypeGuard[AwaitableCallable[Any]]: ...
+
+
+def is_async_callable(obj: Any) -> Any:
+    while isinstance(obj, functools.partial):
+        obj = obj.func
+
+    return asyncio.iscoroutinefunction(obj) or (
+        callable(obj) and asyncio.iscoroutinefunction(obj.__call__)
+    )

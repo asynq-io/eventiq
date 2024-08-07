@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.fields import FieldInfo, _FieldInfoInputs
-from pydantic_core.core_schema import ValidationInfo
+from typing_extensions import Self
 
 from .types import Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
@@ -23,11 +23,13 @@ D = TypeVar("D", bound=Any)
 
 
 class CloudEvent(BaseModel, Generic[D]):
-    """Base Schema for all messages"""
+    """Base Schema for all messages."""
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
     content_type: str = Field(
-        "application/json", alias="datacontenttype", description="Message content type"
+        "application/json",
+        alias="datacontenttype",
+        description="Message content type",
     )
     id: UUID = Field(default_factory=uuid4, description="Event ID", repr=True)
     time: datetime = Field(default_factory=utc_now, description="Event created time")
@@ -52,35 +54,34 @@ class CloudEvent(BaseModel, Generic[D]):
         topic: Optional[str] = None,
         validate_topic: bool = False,
         **kwargs: Any,
-    ):
-        if not abstract:
-            if topic:
-                kw: _FieldInfoInputs = {
-                    "alias": "subject",
-                    "description": "Message subject",
-                    "validate_default": True,
-                }
-                if any(k in topic for k in TOPIC_SPECIAL_CHARS):
-                    kw.update(
-                        {
-                            "annotation": str,
-                            "default": topic,
-                        }
-                    )
-                    if validate_topic:
-                        kw["pattern"] = get_topic_regex(topic)
-                else:
-                    kw.update(
-                        {
-                            "annotation": get_annotation(topic),
-                            "default": topic,
-                        }
-                    )
+    ) -> None:
+        if not abstract and topic:
+            kw: _FieldInfoInputs = {
+                "alias": "subject",
+                "description": "Message subject",
+                "validate_default": True,
+            }
+            if any(k in topic for k in TOPIC_SPECIAL_CHARS):
+                kw.update(
+                    {
+                        "annotation": str,
+                        "default": topic,
+                    },
+                )
+                if validate_topic:
+                    kw["pattern"] = get_topic_regex(topic)
+            else:
+                kw.update(
+                    {
+                        "annotation": get_annotation(topic),
+                        "default": topic,
+                    },
+                )
 
-                cls.model_fields["topic"] = FieldInfo(**kw)
-            super().__init_subclass__(**kwargs)
+            cls.model_fields["topic"] = FieldInfo(**kw)
+        super().__init_subclass__(**kwargs)
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, CloudEvent):
             return False
         return self.id == other.id
@@ -102,26 +103,31 @@ class CloudEvent(BaseModel, Generic[D]):
 
     @field_validator("type", mode="before")
     @classmethod
-    def get_default_type(cls, value, info: ValidationInfo):
+    def get_default_type(cls, value: Any) -> str:
         if value is None:
             return cls.__name__
-        return value
+        return str(value)
 
     @property
     def raw(self) -> Any:
         if self._raw is None:
-            raise ValueError("raw property accessible only for incoming messages")
+            msg = "raw property accessible only for incoming messages"
+            raise ValueError(msg)
         return self._raw
 
     @property
     def service(self) -> "Service":
         if self._service is None:
-            raise ValueError("Service not set")
+            msg = "Service not set"
+            raise ValueError(msg)
         return self._service
 
-    def set_context(self, service: "Service", raw: Any) -> None:
+    def set_context(
+        self, service: "Service", raw: Any, headers: dict[str, str]
+    ) -> None:
         self._service = service
         self._raw = raw
+        self._headers = headers
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("by_alias", True)
@@ -129,15 +135,13 @@ class CloudEvent(BaseModel, Generic[D]):
         return super().model_dump(**kwargs)
 
     @classmethod
-    def new(cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any):
+    def new(
+        cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
+    ) -> Self:
         self = cls(data=obj, **kwargs)
         if headers:
             self._headers.update(headers)
         return self
-
-    @property
-    def extra_span_attributes(self) -> dict[str, str]:
-        return {}
 
     @property
     def age(self) -> timedelta:
@@ -166,11 +170,12 @@ class Publishes(BaseModel):
     asyncapi_extra: dict[str, Any] = {}
 
     @model_validator(mode="after")
-    def validate_topic(self):
+    def validate_topic(self) -> Self:
         if self.topic is None:
             topic = self.type.get_default_topic()
             if topic is None:
-                raise ValueError("Topic is required")
+                msg = "Topic is required"
+                raise ValueError(msg)
             self.topic = topic
         return self
 

@@ -6,14 +6,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from anyio.streams.memory import MemoryObjectSendStream
-
 from eventiq.broker import Broker
 from eventiq.settings import BrokerSettings
-from eventiq.types import Encoder
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
     from eventiq import CloudEvent, Consumer
+    from eventiq.types import DecodedMessage, Encoder
 
 
 @dataclass
@@ -48,27 +48,28 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         super().__init__(**kwargs)
         self.queue_max_size = queue_max_size
         self.topics: dict[str, asyncio.Queue[StubMessage]] = defaultdict(
-            self.queue_factory
+            self.queue_factory,
         )
         self._connected = False
         self.wait_on_publish = wait_on_publish
 
-    def queue_factory(self):
+    def queue_factory(self) -> asyncio.Queue[StubMessage]:
         return asyncio.Queue(maxsize=self.queue_max_size)
 
     def get_info(self) -> dict[str, str]:
         return {"host": "localhost"}
 
     @staticmethod
-    def get_message_data(raw_message: StubMessage) -> bytes:
-        return raw_message.data
+    def decode_message(raw_message: StubMessage) -> DecodedMessage:
+        return raw_message.data, raw_message.headers
+        return super().decode_message(raw_message)
 
     async def sender(
         self,
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[StubMessage],
-    ):
+    ) -> None:
         queue = self.topics[self.format_topic(consumer.topic)]
         async with send_stream:
             while self._connected:
@@ -83,16 +84,20 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         self.topics.clear()
 
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
     ) -> dict[str, asyncio.Event]:
         data = self._encode_message(message, encoder)
-        headers = kwargs.get("headers", {})
         response = {}
         message_topic = self.format_topic(message.topic)
         for topic, queue in self.topics.items():
             if re.fullmatch(message_topic, topic):
                 event = asyncio.Event()
-                msg = StubMessage(data=data, queue=queue, event=event, headers=headers)
+                msg = StubMessage(
+                    data=data, queue=queue, event=event, headers=message.headers
+                )
                 await queue.put(msg)
                 response[topic] = event
                 if self.wait_on_publish:

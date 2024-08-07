@@ -1,9 +1,8 @@
-import asyncio
-
 from pydantic import BaseModel
 
-from eventiq import CloudEvent, Middleware, Publishes, Service
+from eventiq import CloudEvent, Publishes, Service
 from eventiq.backends.nats import JetStreamBroker
+from eventiq.models import Command
 
 broker = JetStreamBroker(url="nats://nats:password@localhost:4222")
 
@@ -19,27 +18,14 @@ class MyEvent(CloudEvent[MyData]):
     """Some custom event"""
 
 
-class MyCommand(CloudEvent[int], topic="commands.run"):
+class MyCommand(Command[int], topic="commands.run"):
     """Command representing current number of items"""
-
-
-class SendMessageMiddleware(Middleware):
-    async def after_service_start(self, *, service: Service):
-        self.logger.info(f"After service start, running with {broker}")
-        await asyncio.sleep(5)
-        for i in range(100):
-            event = MyEvent.new(
-                MyData(**{"counter": i, "info": "default"}), topic="test.topic"
-            )
-            await service.publish(event)
-        self.logger.info("Published event(s)")
 
 
 service = Service(
     name="example-service",
     version="1.0",
     broker=broker,
-    middlewares=[SendMessageMiddleware()],
     publishes=[
         Publishes(
             type=MyEvent,
@@ -66,7 +52,7 @@ service = Service(
             "enum": ["a", "b", "c"],
             "description": "Some description",
             "examples": ["a", "b"],
-        }
+        },
     },
 )
 async def example_handler(message: MyEvent):

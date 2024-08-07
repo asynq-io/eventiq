@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import TypeAdapter
-
 from .exceptions import DecodeError
-from .types import Decoder, RawData, T
-
-AnyType: TypeAdapter = TypeAdapter(Any)
+from .types import AnyType, Decoder, RawData, T
 
 
 class JsonDecoder:
@@ -19,7 +15,9 @@ class JsonDecoder:
         try:
             if as_type:
                 return as_type.model_validate_json(
-                    data, strict=self.strict, context=self.context
+                    data,
+                    strict=self.strict,
+                    context=self.context,
                 )
             return AnyType.validate_json(data, strict=self.strict, context=self.context)
         except Exception as e:

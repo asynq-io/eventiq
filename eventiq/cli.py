@@ -22,7 +22,8 @@ if "." not in sys.path:
 def import_service(path: str) -> Service:
     service = import_from_string(path)
     if not isinstance(service, Service):
-        raise TypeError(f"Service must be an instance of Service, got {type(service)}")
+        msg = f"Service must be an instance of Service, got {type(service)}"
+        raise TypeError(msg)
     return service
 
 
@@ -53,7 +54,8 @@ def run(
         help="Logger level, accepted values are: debug, info, warning, error, critical",
     ),
     log_config: Optional[str] = typer.Option(
-        None, help="Logging file configuration path."
+        None,
+        help="Logging file configuration path.",
     ),
     use_uvloop: Optional[bool] = typer.Option(None, help="Enable uvloop"),
     debug: bool = typer.Option(False, help="Enable debug"),
@@ -63,13 +65,17 @@ def run(
         try:
             from watchfiles import run_process
         except ImportError:
-            logger.error(
-                "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'."
+            logger.exception(
+                "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'.",
             )
             return
-        logger.info(f"Watching for changes in: {reload}")
+        logger.info("Watching for changes in: %s", reload)
         target = _build_target_from_opts(
-            service, log_level, log_config, use_uvloop, debug
+            service,
+            log_level,
+            log_config,
+            use_uvloop,
+            debug,
         )
         run_process(
             reload,
@@ -85,7 +91,7 @@ def run(
     if log_config:
         logging.config.fileConfig(log_config)
     instance = import_service(service)
-    logger.info(f"Running service: {service}...")
+    logger.info("Running service: %s", service)
     anyio.run(
         instance.run,
         True,
@@ -112,10 +118,10 @@ def send(
         "CloudEvent",
         help="Message type",
     ),
-):
+) -> None:
     svc = import_service(service)
 
-    async def connect_and_send(message):
+    async def connect_and_send(message: CloudEvent) -> None:
         await svc.broker.connect()
         try:
             await svc.publish(message)
@@ -135,9 +141,10 @@ def docs(
     ),
     out: Path = typer.Option("./asyncapi.json", help="Output file path"),
     format: str = typer.Option(
-        "json", help="Output format. Valid options are 'yaml' and 'json'(default)"
+        "json",
+        help="Output format. Valid options are 'yaml' and 'json'(default)",
     ),
-):
+) -> None:
     from eventiq.asyncapi import get_async_api_spec, save_async_api_to_file
 
     svc = import_service(service)

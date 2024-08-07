@@ -42,23 +42,28 @@ pip install 'eventiq[broker]'
 ## Features
 
 - Modern, `asyncio` based python 3.8+ syntax
+- Fully type annotated
 - Minimal external dependencies (`anyio`, `pydantic`, `typer`)
 - Automatic message parsing based on type annotations using `pydantic`
 - Code hot-reload
 - Highly scalable: each service can process hundreds of tasks concurrently,
     all messages are load balanced between all instances by default
-- Resilient - at least once delivery for all messages by default
-- Customizable & pluggable message encoders (json by default)
+- Resilient - at least once delivery for all messages by default (except for Redis*)
+- Customizable & pluggable message encoder/decoder (`json` as default)
 - Multiple broker support
     - Memory (for testing)
     - Nats
     - Kafka
     - Rabbitmq
     - Redis
-- Easily extensible via Middlewares
-- Cloud Events standard as base message structure (no more python specific `*args` and `**kwargs` in messages)
-- AsyncAPI documentation generation from code
+- Result Backend implementation for Nats & Redis
+- Lifespan protocol support
+- Lightweight (and completely optional) dependency injection system based on type annotations
+- Easy and lightweight (~3k lines of code including types definitions and brokers implementations)
+- [Cloud Events](https://cloudevents.io/) standard as base message structure (no more python specific `*args` and `**kwargs` in messages)
+- [AsyncAPI](https://www.asyncapi.com/en) documentation generation from code
 - Twelve factor app approach - stdout logging, configuration through environment variables
+- Easily extensible via Middlewares
 - Multiple extensions and integrations including:
   - Prometheus - mertics exporter
   - OpenTelemetry - tracing and metrics
@@ -75,7 +80,7 @@ from eventiq import Service, Middleware, CloudEvent
 from eventiq.backends.nats import JetStreamBroker
 
 class SendMessageMiddleware(Middleware):
-    async def after_broker_connect(self, *, service: Service):
+    async def after_broker_connect(self):
         print(f"After service start, running with {service.broker}")
         await asyncio.sleep(10)
         for i in range(100):
@@ -102,7 +107,6 @@ Run with
 ```shell
 eventiq run app:service --log-level=info
 ```
-
 
 ## Watching for changes
 

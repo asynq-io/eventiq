@@ -3,7 +3,6 @@ from .broker import Broker
 from .consumer import Consumer, ConsumerGroup, GenericConsumer
 from .middleware import Middleware
 from .models import CloudEvent, Publishes
-from .results import Result
 from .service import Service
 
 __all__ = [
@@ -15,6 +14,5 @@ __all__ = [
     "Publishes",
     "GenericConsumer",
     "Middleware",
-    "Result",
     "Service",
 ]

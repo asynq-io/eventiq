@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import (
@@ -12,21 +12,27 @@ from typing import (
     Union,
     overload,
 )
+from uuid import uuid4
 
-from typing_extensions import TypedDict, Unpack
+import anyio
+from typing_extensions import Concatenate, ParamSpec, TypedDict, Unpack
 
+from .dependencies import resolved_func
 from .logging import get_logger
 from .types import CloudEventType, Decoder, Parameter, Timeout
-from .utils import resolve_message_type_hint, to_async
+from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
+
+P = ParamSpec("P")
+
 
 if TYPE_CHECKING:
-    from .models import Publishes
+    from anyio.streams.memory import MemoryObjectSendStream
 
-Fn = Callable[[CloudEventType], Awaitable[Any]]
+    from .models import Publishes
 
 
 class Consumer(ABC, Generic[CloudEventType]):
-    """Base consumer class"""
+    """Base consumer class."""
 
     def __init__(
         self,
@@ -46,12 +52,15 @@ class Consumer(ABC, Generic[CloudEventType]):
         **options: Any,
     ) -> None:
         if event_type is None:
-            raise ValueError("Event type is required")
+            msg = "Event type is required"
+            raise ValueError(msg)
         topic = topic or event_type.get_default_topic()
         if not topic:
-            raise ValueError("Topic is required")
+            msg = "Topic is required"
+            raise ValueError(msg)
         if concurrency < 1:
-            raise ValueError("Concurrency must be greater than 0")
+            msg = "Concurrency must be greater than 0"
+            raise ValueError(msg)
         self.name = name
         self.event_type = event_type
         self.topic = topic
@@ -67,16 +76,20 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.options: dict[str, Any] = options
         self.logger = get_logger(__name__, self.name)
 
-    @abstractmethod
-    async def process(self, message: CloudEventType) -> Any:
-        raise NotImplementedError
+    if TYPE_CHECKING:
+        process: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
+    else:
+
+        @abstractmethod
+        async def process(self, message: CloudEventType) -> Any:
+            raise NotImplementedError
 
 
-class FnConsumer(Consumer[CloudEventType]):
+class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
     def __init__(
         self,
         *,
-        fn: Fn,
+        fn: Callable[Concatenate[CloudEventType, P], Awaitable[Any]],
         **extra: Any,
     ) -> None:
         if "name" not in extra:
@@ -85,13 +98,15 @@ class FnConsumer(Consumer[CloudEventType]):
             extra["event_type"] = resolve_message_type_hint(fn)
         if "description" not in extra:
             extra["description"] = fn.__doc__ or ""
-        if not asyncio.iscoroutinefunction(fn):
+        if not is_async_callable(fn):
             fn = to_async(fn)
-        self.fn = fn
+        self.fn = resolved_func(fn)
         super().__init__(**extra)
 
-    async def process(self, message: CloudEventType) -> Any:
-        return await self.fn(message)
+    async def process(
+        self, message: CloudEventType, *args: P.args, **kwargs: P.kwargs
+    ) -> Any:
+        return await self.fn(message, *args, **kwargs)
 
 
 class GenericConsumer(Consumer[CloudEventType], ABC):
@@ -99,14 +114,36 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)
         if "event_type" not in extra:
-            extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore
+            extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore[attr-defined]
         if "description" not in extra:
             extra["description"] = type(self).__doc__ or ""
 
         super().__init__(**extra)
+        self.process = resolved_func(self.process)
 
 
-MessageHandlerT = Union[type[GenericConsumer], Fn]
+class ChannelConsumer(Consumer[CloudEventType]):
+    def __inii__(
+        self,
+        channel: MemoryObjectSendStream[tuple[CloudEventType, Callable[[], None]]],
+        **extra: Any,
+    ) -> None:
+        if "name" not in extra:
+            extra["name"] = f"{socket.gethostname()}:{uuid4()}"
+        super().__init__(**extra)
+        self.channel = channel
+        self._timeout = to_float(self.timeout) or 10.0
+
+    async def process(self, message: CloudEventType) -> Any:
+        event = anyio.Event()
+        await self.channel.send((message, event.set))
+        with anyio.fail_after(self._timeout):
+            await event.wait()
+
+
+MessageHandler = Union[
+    type[GenericConsumer], Callable[Concatenate[CloudEventType, P], Awaitable[Any]]
+]
 
 
 class ConsumerGroupOptions(TypedDict, total=False):
@@ -138,39 +175,41 @@ class ConsumerGroup:
         self.consumers.update(other.consumers)
 
     @overload
-    def subscribe(self, func_or_cls: MessageHandlerT) -> MessageHandlerT: ...
+    def subscribe(self, func_or_cls: MessageHandler) -> MessageHandler: ...
 
     @overload
     def subscribe(
         self,
         func_or_cls: None = None,
         **options: Unpack[ConsumerOptions],
-    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
+    ) -> Callable[[MessageHandler], MessageHandler]: ...
 
     @overload
     def subscribe(
         self,
         func_or_cls: None = None,
         **options: Any,
-    ) -> Callable[[MessageHandlerT], MessageHandlerT]: ...
+    ) -> Callable[[MessageHandler], MessageHandler]: ...
 
     def subscribe(
         self,
-        func_or_cls: MessageHandlerT | None = None,
+        func_or_cls: MessageHandler | None = None,
         **options: Any,
-    ) -> MessageHandlerT | Callable[[MessageHandlerT], MessageHandlerT]:
-        def decorator(func_or_cls: MessageHandlerT) -> MessageHandlerT:
+    ) -> MessageHandler | Callable[[MessageHandler], MessageHandler]:
+        def decorator(func_or_cls: MessageHandler) -> MessageHandler:
             cls: type[Consumer] = FnConsumer
             if inspect.isfunction(func_or_cls):
                 options["fn"] = func_or_cls
 
             elif isinstance(func_or_cls, type) and issubclass(
-                func_or_cls, GenericConsumer
+                func_or_cls,
+                GenericConsumer,
             ):
                 cls = func_or_cls
             else:
+                msg = f"Expected function or GenericConsumer got {type(func_or_cls)}"
                 raise TypeError(
-                    f"Expected function or GenericConsumer got {type(func_or_cls)}"
+                    msg,
                 )
             for k, v in self.options.items():
                 options.setdefault(k, v)

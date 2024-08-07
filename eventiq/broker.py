@@ -2,38 +2,35 @@ from __future__ import annotations
 
 import inspect
 import os
-import re
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from urllib.parse import urlparse
-
-from anyio.streams.memory import MemoryObjectSendStream
-from pydantic import AnyUrl
 
 from .decoder import DEFAULT_DECODER
 from .encoder import DEFAULT_ENCODER
 from .imports import import_from_string
 from .logging import LoggerMixin
-from .models import CloudEvent
 from .settings import BrokerSettings, UrlBrokerSettings
-from .types import Decoder, Encoder, Message, Timeout
+from .types import DecodedMessage, Decoder, DefaultAction, Encoder, Message, Timeout
 from .utils import format_topic, to_float
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+    from pydantic import AnyUrl
+
     from eventiq import Consumer
 
-TOPIC_PATTERN = re.compile(r"{\w+}")
+    from .models import CloudEvent
+
 
 R = TypeVar("R", bound=Any)
-
-DefaultAction = Literal["ack", "nack"]
 
 
 class Broker(Generic[Message, R], LoggerMixin, ABC):
     """Base broker class
     :param description: Broker (Server) Description
     :param encoder: Encoder (Serializer) class
-    :param decoder: Decoder (Deserializer) class
+    :param decoder: Decoder (Deserializer) class.
     """
 
     protocol: str
@@ -49,7 +46,8 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         if not inspect.isabstract(cls):
             protocol = getattr(cls, "protocol", None)
             if protocol is None:
-                raise ValueError(f"Broker subclass {cls} must define a protocol")
+                msg = f"Broker subclass {cls} must define a protocol"
+                raise ValueError(msg)
 
     def __init__(
         self,
@@ -74,39 +72,19 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         self.default_consumer_timeout = to_float(default_consumer_timeout)
         self.validate_error_delay = validate_error_delay
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return type(self).__name__
 
     def should_nack(self, raw_message: Message) -> bool:
         return False
 
-    @classmethod
-    def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
-        return cls(**settings.model_dump(), **kwargs)
-
-    @classmethod
-    def _from_env(cls, **kwargs) -> Broker:
-        return cls.from_settings(cls.Settings(**kwargs))
-
-    @classmethod
-    def from_env(
-        cls,
-        **kwargs,
-    ) -> Broker:
-        if cls == Broker:
-            type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
-            cls = import_from_string(type_name)
-        return cls._from_env(**kwargs)
-
-    @staticmethod
-    def get_message_metadata(raw_message: Message) -> dict[str, str]:
-        return {}
-
     def format_topic(self, topic: str) -> str:
         return format_topic(topic, self.WILDCARD_ONE, self.WILDCARD_MANY)
 
     def _encode_message(
-        self, message: CloudEvent, encoder: Encoder | None = None
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
     ) -> bytes:
         encoder = encoder or self.encoder
         message.content_type = encoder.CONTENT_TYPE
@@ -118,18 +96,21 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
     @staticmethod
     @abstractmethod
-    def get_message_data(raw_message: Message) -> bytes:
+    def decode_message(raw_message: Message) -> DecodedMessage:
         raise NotImplementedError
 
     @property
     @abstractmethod
     def is_connected(self) -> bool:
-        """Return broker connection status"""
+        """Return broker connection status."""
         raise NotImplementedError
 
     @abstractmethod
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
     ) -> R:
         raise NotImplementedError
 
@@ -155,11 +136,29 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[Message],
-    ):
+    ) -> None:
         raise NotImplementedError
 
     def get_num_delivered(self, raw_message: Message) -> int | None:
-        return None
+        return getattr(raw_message, "num_delivered", None)
+
+    @classmethod
+    def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
+        return cls(**settings.model_dump(), **kwargs)
+
+    @classmethod
+    def _from_env(cls, **kwargs: Any) -> Broker:
+        return cls.from_settings(cls.Settings(**kwargs))
+
+    @classmethod
+    def from_env(
+        cls,
+        **kwargs: Any,
+    ) -> Broker:
+        if cls == Broker:
+            type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
+            cls = import_from_string(type_name)
+        return cls._from_env(**kwargs)
 
 
 class UrlBroker(Broker[Message, R], ABC):
@@ -173,7 +172,7 @@ class UrlBroker(Broker[Message, R], ABC):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.url = str(url)  # TODO: cast(str, url)?
+        self.url = str(url)
         self.connection_options = connection_options or {}
 
     def get_info(self) -> dict[str, Any]:

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
 
-from anyio.streams.memory import MemoryObjectSendStream
 from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker, UrlBrokerSettings
 from eventiq.exceptions import BrokerError
-from eventiq.results import Error, Ok, Result, ResultBackend
-from eventiq.types import Encoder
+from eventiq.results import AnyModel, ResultBackend
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
     from eventiq import CloudEvent, Consumer
+    from eventiq.types import DecodedMessage, Encoder
 
 RedisUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["redis", "rediss"])]
 
@@ -28,11 +29,11 @@ RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 
 class RedisBroker(
-    UrlBroker[RedisRawMessage, None], ResultBackend[RedisRawMessage, None]
+    UrlBroker[RedisRawMessage, None],
+    ResultBackend[RedisRawMessage, None],
 ):
-    """
-    Broker implementation based on redis PUB/SUB and aioredis package
-    :param kwargs: base class arguments
+    """Broker implementation based on redis PUB/SUB and aioredis package
+    :param kwargs: base class arguments.
     """
 
     Settings = UrlBrokerSettings[RedisUrl]
@@ -49,8 +50,8 @@ class RedisBroker(
         self._redis: Redis | None = None
 
     @staticmethod
-    def get_message_data(raw_message: RedisRawMessage) -> bytes:
-        return raw_message["data"]
+    def decode_message(raw_message: RedisRawMessage) -> DecodedMessage:
+        return raw_message["data"], None
 
     @property
     def is_connected(self) -> bool:
@@ -61,44 +62,60 @@ class RedisBroker(
     @property
     def redis(self) -> Redis:
         if self._redis is None:
-            raise BrokerError("Not connected")
+            err = "Not connected"
+            raise BrokerError(err)
         return self._redis
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
-    ):
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
+    ) -> None:
+        message = None
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
-            async with send_stream:
-                while True:
-                    # TODO: timeout?
-                    message = await sub.get_message(ignore_subscribe_messages=True)
-                    if message:
-                        await send_stream.send(message)
+            try:
+                async with send_stream:
+                    while True:
+                        message = await sub.get_message(ignore_subscribe_messages=True)
+                        if message:
+                            await send_stream.send(message)
+            finally:
+                if message:
+                    await self.nack(message)
 
     async def disconnect(self) -> None:
-        await self.redis.close()
+        if self._redis:
+            await self._redis.close()
 
     async def connect(self) -> None:
-        self._redis = Redis.from_url(self.url, **self.connection_options)
+        if self._redis is None:
+            self._redis = Redis.from_url(self.url, **self.connection_options)
 
     async def publish(
-        self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
+        self,
+        message: CloudEvent,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
     ) -> None:
         data = self._encode_message(message, encoder)
         await self.redis.publish(message.topic, data)
 
-    async def store_result(self, key: str, result: Ok | Error) -> None:
+    async def store_result(self, key: str, result: AnyModel) -> None:
         data = self.encoder.encode(result)
         await self.redis.set(key, data)
 
-    async def get_result(self, key: str) -> Result | None:
+    async def get_result(self, key: str) -> Any:
         result = await self.redis.get(key)
         if result:
-            return self.decoder.decode(result, Result)
+            return self.decoder.decode(result)
+        return None
 
-    async def ack(self, raw_message: RedisRawMessage):
+    async def ack(self, raw_message: RedisRawMessage) -> None:
         pass
 
-    async def nack(self, raw_message: RedisRawMessage, delay: int | None = None):
+    async def nack(
+        self, raw_message: RedisRawMessage, delay: int | None = None
+    ) -> None:
         await self.redis.publish(raw_message["channel"], raw_message["data"])

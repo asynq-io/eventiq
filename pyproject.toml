@@ -83,7 +83,7 @@ check = [
 ]
 
 [tool.coverage.run]
-source_pkgs = ["eventiq", "tests"]
+source_pkgs = ["eventiq"]
 branch = true
 parallel = true
 omit = ["eventiq/__about__.py"]
@@ -96,9 +96,9 @@ tests = ["tests"]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 addopts = "--cov=./eventiq"
 testpaths = ["./tests"]
-asyncio_mode = "auto"
 filterwarnings = "ignore::DeprecationWarning"
 
 [tool.pyright]
@@ -106,7 +106,7 @@ venvPath = ".venv"
 venv = "eventiq"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 follow_imports = "normal"
@@ -124,20 +124,36 @@ line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "C",   # flake8-comprehensions
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-    "SIM", # flake8-simplify
-]
+select = ["ALL"]
+
 ignore = [
-    "B008", # do not perform function calls in argument defaults
-    "E501", # line too long
+    "A001",
+    "A002",
+    "ARG002",
+    "ARG004",
+    "ANN401",
+    "B008",    # do not perform function calls in argument defaults
+    "BLE001",
+    "COM812",
+    "D",
+    "E501",    # line too long
+    "FA100",
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    "ISC001",
+    "N818",
+    "PLR0913",
+    "PLR2004",
+    "PTH123",
+    "S108",
+
 ]
+
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ANN001", "ANN201"]
+"examples/*" = ["S101", "ANN001", "ANN201", "INP001", "T201"]
 
 [tool.bandit]
 skips = ['B101']
