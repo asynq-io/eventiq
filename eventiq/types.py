@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Literal,
+    Optional,
     Protocol,
     TypeVar,
     Union,
@@ -27,7 +28,7 @@ ID = Union[UUID, str]
 
 Message = TypeVar("Message")
 DefaultAction = Literal["ack", "nack"]
-DecodedMessage = tuple[bytes, dict[str, str] | None]
+DecodedMessage = tuple[bytes, Optional[dict[str, str]]]
 
 T = TypeVar("T", bound=BaseModel)
 Seconds = Union[int, float]
@@ -39,7 +40,7 @@ AnyType: TypeAdapter = TypeAdapter(Any)
 State = dict[Union[type, str], Any]
 
 
-Lifespan = Callable[["Service"], AbstractAsyncContextManager[State | None]]
+Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
 
 P = ParamSpec("P")
 
