@@ -234,7 +234,7 @@ class JetStreamBroker(
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
     ) -> None:
-        config_kwargs = {
+        config_kwargs: dict[str, Any] = {
             "ack_wait": (to_float(consumer.timeout) or self.default_consumer_timeout)
             + 30,
             "max_ack_pending": 10_000,
@@ -244,6 +244,8 @@ class JetStreamBroker(
                 config_kwargs[key] = consumer.options[key]
         config = ConsumerConfig(**config_kwargs)
         batch = consumer.options.get("batch", consumer.concurrency * 2)
+        fetch_timeout = consumer.options.get("fetch_timeout", 10)
+        heartbeat = consumer.options.get("heartbeat", 0.1)
         try:
             subscription = await self.js.pull_subscribe(
                 subject=self.format_topic(consumer.topic),
@@ -260,8 +262,8 @@ class JetStreamBroker(
                     try:
                         messages = await subscription.fetch(
                             batch=batch,
-                            timeout=10,
-                            heartbeat=0.1,
+                            timeout=fetch_timeout,
+                            heartbeat=heartbeat,
                         )
                         for message in messages:
                             await send_stream.send(message)
