@@ -93,7 +93,9 @@ def ce(service) -> CloudEvent:
 
 @pytest.fixture()
 def mock_consumer():
-    return AsyncMock()
+    mock = AsyncMock()
+    mock.__annotations__ = {"message": CloudEvent, "return": None}
+    return mock
 
 
 @asynccontextmanager
