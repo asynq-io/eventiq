@@ -6,6 +6,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Literal,
     Protocol,
     TypeVar,
     Union,
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 ID = Union[UUID, str]
 
 Message = TypeVar("Message")
+DefaultAction = Literal["ack", "nack"]
+DecodedMessage = tuple[bytes, dict[str, str] | None]
 
 T = TypeVar("T", bound=BaseModel)
 Seconds = Union[int, float]

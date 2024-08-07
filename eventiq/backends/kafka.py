@@ -13,18 +13,18 @@ from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import utc_now
 
+if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
+    from eventiq import CloudEvent, Consumer
+    from eventiq.types import DecodedMessage, Encoder
+
+
 KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
 
 
 class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
     consumer_options: dict[str, Any] = Field({})
-
-
-if TYPE_CHECKING:
-    from anyio.streams.memory import MemoryObjectSendStream
-
-    from eventiq import CloudEvent, Consumer
-    from eventiq.types import Encoder
 
 
 class KafkaBroker(UrlBroker[ConsumerRecord, None]):
@@ -51,8 +51,10 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         self._subcsribers: dict[int, AIOKafkaConsumer] = {}
 
     @staticmethod
-    def get_message_data(raw_message: ConsumerRecord) -> bytes:
-        return raw_message.value or b""
+    def decode_message(raw_message: ConsumerRecord) -> DecodedMessage:
+        data = raw_message.value or b""
+        headers = {k: str(v) for k, v in raw_message.headers}
+        return data, headers
 
     @staticmethod
     def get_message_metadata(
@@ -65,10 +67,6 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         if raw_message.key:
             metadata["messaging.kafka.message.key"] = str(raw_message.key)
         return metadata
-
-    @staticmethod
-    def get_message_headers(raw_message: ConsumerRecord) -> dict[str, str]:
-        return {k: str(v) for k, v in raw_message.headers}
 
     @property
     def is_connected(self) -> bool:

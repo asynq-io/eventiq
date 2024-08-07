@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import CloudEvent, Consumer
-    from eventiq.types import Encoder
+    from eventiq.types import DecodedMessage, Encoder
 
 
 @dataclass
@@ -60,12 +60,9 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         return {"host": "localhost"}
 
     @staticmethod
-    def get_message_data(raw_message: StubMessage) -> bytes:
-        return raw_message.data
-
-    @staticmethod
-    def get_message_headers(raw_message: StubMessage) -> dict[str, str]:
-        return raw_message.headers
+    def decode_message(raw_message: StubMessage) -> DecodedMessage:
+        return raw_message.data, raw_message.headers
+        return super().decode_message(raw_message)
 
     async def sender(
         self,

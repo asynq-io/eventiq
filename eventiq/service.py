@@ -256,8 +256,7 @@ class Service(Generic[Message, R], LoggerMixin):
         result = None
 
         try:
-            data = self.broker.get_message_data(raw_message)
-            headers = self.broker.get_message_headers(raw_message)
+            data, headers = self.broker.decode_message(raw_message)
             message = decoder.decode(data, consumer.event_type)
             message.set_context(self, raw_message, headers)
         except (DecodeError, ValidationError) as e:

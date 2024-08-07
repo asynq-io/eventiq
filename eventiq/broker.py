@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from urllib.parse import urlparse
 
 from .decoder import DEFAULT_DECODER
@@ -11,7 +11,7 @@ from .encoder import DEFAULT_ENCODER
 from .imports import import_from_string
 from .logging import LoggerMixin
 from .settings import BrokerSettings, UrlBrokerSettings
-from .types import Decoder, Encoder, Message, Timeout
+from .types import DecodedMessage, Decoder, DefaultAction, Encoder, Message, Timeout
 from .utils import format_topic, to_float
 
 if TYPE_CHECKING:
@@ -24,8 +24,6 @@ if TYPE_CHECKING:
 
 
 R = TypeVar("R", bound=Any)
-
-DefaultAction = Literal["ack", "nack"]
 
 
 class Broker(Generic[Message, R], LoggerMixin, ABC):
@@ -97,16 +95,8 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         raise NotImplementedError
 
     @staticmethod
-    def get_message_headers(raw_message: Message) -> dict[str, str]:
-        return {}
-
-    @staticmethod
-    def get_message_metadata(raw_message: Message) -> dict[str, str]:
-        return {}
-
-    @staticmethod
     @abstractmethod
-    def get_message_data(raw_message: Message) -> bytes:
+    def decode_message(raw_message: Message) -> DecodedMessage:
         raise NotImplementedError
 
     @property

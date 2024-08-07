@@ -21,6 +21,8 @@ from eventiq.utils import to_float, utc_now
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
+    from eventiq.types import DecodedMessage
+
 NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
 
 
@@ -72,6 +74,10 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         return wrapped
 
     @staticmethod
+    def decode_message(raw_message: NatsMsg) -> DecodedMessage:
+        return raw_message.data, raw_message.headers
+
+    @staticmethod
     def get_message_data(raw_message: NatsMsg) -> bytes:
         return raw_message.data
 
@@ -89,10 +95,6 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
             }
         except Exception:
             return {}
-
-    @staticmethod
-    def get_message_headers(raw_message: NatsMsg) -> dict[str, str]:
-        return raw_message.headers or {}
 
     async def connect(self) -> None:
         if not self.client.is_connected:

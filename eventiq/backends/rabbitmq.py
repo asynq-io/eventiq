@@ -16,19 +16,19 @@ from eventiq.broker import UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
 
+if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectSendStream
+
+    from eventiq import CloudEvent, Consumer
+    from eventiq.types import DecodedMessage, Encoder
+
+
 RabbitmqUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["amqp"])]
 
 
 class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
     default_prefetch_count: int = 10
     exchange_name: str = "default"
-
-
-if TYPE_CHECKING:
-    from anyio.streams.memory import MemoryObjectSendStream
-
-    from eventiq import CloudEvent, Consumer
-    from eventiq.types import Encoder
 
 
 class RabbitmqBroker(
@@ -163,12 +163,9 @@ class RabbitmqBroker(
         return not self.connection.is_closed
 
     @staticmethod
-    def get_message_data(raw_message: AbstractIncomingMessage) -> bytes:
-        return raw_message.body
-
-    @staticmethod
-    def get_message_headers(raw_message: AbstractIncomingMessage) -> dict[str, str]:
-        return {k: str(v) for k, v in raw_message.headers.items()}
+    def decode_message(raw_message: AbstractIncomingMessage) -> DecodedMessage:
+        headers = {k: str(v) for k, v in raw_message.headers.items()}
+        return raw_message.body, headers
 
     @staticmethod
     def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:

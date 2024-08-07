@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import CloudEvent, Consumer
-    from eventiq.types import Encoder
+    from eventiq.types import DecodedMessage, Encoder
 
 RedisUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["redis", "rediss"])]
 
@@ -50,8 +50,8 @@ class RedisBroker(
         self._redis: Redis | None = None
 
     @staticmethod
-    def get_message_data(raw_message: RedisRawMessage) -> bytes:
-        return raw_message["data"]
+    def decode_message(raw_message: RedisRawMessage) -> DecodedMessage:
+        return raw_message["data"], None
 
     @property
     def is_connected(self) -> bool:
