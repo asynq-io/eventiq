@@ -12,11 +12,13 @@ if TYPE_CHECKING:
 class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
+        service: Service,
         topic: str = "dlx",
         type_: str = "MessageFailedEvent",
         event_class: type[CloudEvent] = CloudEvent,
         **kwargs: Any,
     ) -> None:
+        super().__init__(service)
         self.event_class = event_class
         self.topic = topic
         self.type_ = type_
@@ -25,7 +27,6 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
     async def after_fail_message(
         self,
         *,
-        service: Service,
         message: CloudEventType,
         **_: Any,
     ) -> None:
@@ -35,4 +36,4 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
             topic=self.topic,
             **self.kwargs,
         )
-        await service.publish(ce)
+        await self.service.publish(ce)

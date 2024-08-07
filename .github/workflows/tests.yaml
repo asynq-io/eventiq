@@ -25,11 +25,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install Hatch
         run: pipx install hatch
-      - name: Install types bacport
-        if: matrix.python-version == '3.9'
-        run: pip install eval-type-backport
       - name: Ruff
         if: matrix.python-version == '3.12'
         run: hatch run default:check
+      - name: Install types bacport
+        if: matrix.python-version == '3.9'
+        run: pip install eval-type-backport
       - name: Pytest
         run: hatch run default:test

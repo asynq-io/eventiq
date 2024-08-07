@@ -9,6 +9,10 @@ class BrokerError(EventiqError):
     """Base Exception for broker related errors."""
 
 
+class DependencyError(EventiqError):
+    """Exception raised when a required dependency could not be resolved."""
+
+
 class EncodeError(EventiqError):
     """Error encoding message."""
 

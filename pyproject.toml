@@ -83,7 +83,7 @@ check = [
 ]
 
 [tool.coverage.run]
-source_pkgs = ["eventiq", "tests"]
+source_pkgs = ["eventiq"]
 branch = true
 parallel = true
 omit = ["eventiq/__about__.py"]
@@ -106,7 +106,7 @@ venvPath = ".venv"
 venv = "eventiq"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 follow_imports = "normal"
@@ -124,6 +124,8 @@ line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
+select = ["ALL"]
+
 ignore = [
     "A001",
     "A002",
@@ -142,11 +144,12 @@ ignore = [
     "ISC001",
     "N818",
     "PLR0913",
+    "PLR2004",
     "PTH123",
     "S108",
 
 ]
-select = ["ALL"]
+
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "ANN001", "ANN201"]

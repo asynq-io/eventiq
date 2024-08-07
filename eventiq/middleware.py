@@ -16,22 +16,24 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
 
     requires: type[CloudEventType] | None = None
 
-    async def before_broker_connect(self, *, service: Service) -> None:
+    def __init__(self, service: Service) -> None:
+        self.service = service
+
+    async def before_broker_connect(self) -> None:
         """Called before broker connects."""
 
-    async def after_broker_connect(self, *, service: Service) -> None:
+    async def after_broker_connect(self) -> None:
         """Called after broker connects."""
 
-    async def before_broker_disconnect(self, *, service: Service) -> None:
+    async def before_broker_disconnect(self) -> None:
         """Called before broker disconnects."""
 
-    async def after_broker_disconnect(self, *, service: Service) -> None:
+    async def after_broker_disconnect(self) -> None:
         """Called after broker disconnects."""
 
     async def before_consumer_start(
         self,
         *,
-        service: Service,
         consumer: Consumer,
     ) -> None:
         """Called before consumer is started."""
@@ -39,7 +41,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_consumer_start(
         self,
         *,
-        service: Service,
         consumer: Consumer,
     ) -> None:
         """Called after consumer is started."""
@@ -47,7 +48,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def before_ack(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         raw_message: Any,
     ) -> None:
@@ -56,7 +56,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_ack(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         raw_message: Any,
     ) -> None:
@@ -65,7 +64,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def before_nack(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         raw_message: Any,
     ) -> None:
@@ -74,7 +72,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_nack(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         raw_message: Any,
     ) -> None:
@@ -83,7 +80,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def before_publish(
         self,
         *,
-        service: Service,
         message: CloudEventType,
         **kwargs: Any,
     ) -> None:
@@ -92,7 +88,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_publish(
         self,
         *,
-        service: Service,
         message: CloudEventType,
         **kwargs: Any,
     ) -> None:
@@ -101,7 +96,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_skip_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         exc: Skip,
@@ -111,7 +105,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_fail_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         exc: Fail,
@@ -121,7 +114,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_retry_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         exc: Retry,
@@ -131,7 +123,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def before_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
     ) -> None:
@@ -140,7 +131,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
     async def after_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         result: Any = None,

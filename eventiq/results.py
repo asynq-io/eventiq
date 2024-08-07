@@ -48,25 +48,30 @@ class ResultBackend(Broker[Message, R], ABC):
 
 
 class ResultBackendMiddleware(Middleware):
+    def __init__(self, service: Service) -> None:
+        super().__init__(service)
+        self.result_backend: ResultBackend | None = None
+
+        if isinstance(service.broker, ResultBackend) and service.broker.store_results:
+            self.result_backend = service.broker
+
     async def after_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEvent,
         result: Any | None = None,
         exc: Exception | None = None,
     ) -> None:
-        if not consumer.options.get("store_results"):
+        if not consumer.options.get("store_results") or not self.result_backend:
             return
-        if isinstance(service.broker, ResultBackend) and service.broker.store_results:
-            if exc is None:
-                await service.broker.store_result(
-                    f"{service.name}:{message.id}",
-                    Ok(data=result),
-                )
-            elif service.broker.store_exceptions:
-                await service.broker.store_result(
-                    f"{service.name}:{message.id}",
-                    Error(type=type(exc).__name__, detail=str(exc)),
-                )
+        if exc is None:
+            await self.result_backend.store_result(
+                f"{self.service.name}:{message.id}",
+                Ok(data=result),
+            )
+        elif self.result_backend:
+            await self.result_backend.store_result(
+                f"{self.service.name}:{message.id}",
+                Error(type=type(exc).__name__, detail=str(exc)),
+            )

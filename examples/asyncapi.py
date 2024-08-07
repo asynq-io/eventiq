@@ -1,8 +1,6 @@
-import asyncio
-
 from pydantic import BaseModel
 
-from eventiq import CloudEvent, Middleware, Publishes, Service
+from eventiq import CloudEvent, Publishes, Service
 from eventiq.backends.nats import JetStreamBroker
 from eventiq.models import Command
 
@@ -24,21 +22,10 @@ class MyCommand(Command[int], topic="commands.run"):
     """Command representing current number of items"""
 
 
-class SendMessageMiddleware(Middleware):
-    async def after_service_start(self, *, service: Service):
-        self.logger.info("After service start, running with %s", broker)
-        await asyncio.sleep(5)
-        for i in range(100):
-            event = MyEvent.new(MyData(counter=i, info="default"), topic="test.topic")
-            await service.publish(event)
-        self.logger.info("Published event(s)")
-
-
 service = Service(
     name="example-service",
     version="1.0",
     broker=broker,
-    middlewares=[SendMessageMiddleware()],
     publishes=[
         Publishes(
             type=MyEvent,

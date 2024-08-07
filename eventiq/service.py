@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import signal
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic, Optional, Protocol
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream
 from pydantic import ValidationError
+from typing_extensions import ParamSpec
 
 from .broker import Broker, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
-from .results import Result, ResultBackend, ResultBackendMiddleware
-from .types import ID, Decoder, Encoder, Message
+from .types import Decoder, Encoder, Message, State
 from .utils import to_float
 
 if TYPE_CHECKING:
@@ -26,7 +25,15 @@ if TYPE_CHECKING:
 
     from .middleware import Middleware
 
-Lifespan = Callable[["Service"], AbstractAsyncContextManager[None]]
+Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
+
+P = ParamSpec("P")
+
+
+class MiddlewareType(Protocol[P]):
+    def __call__(
+        self, service: Service, *args: P.args, **kwargs: P.kwargs
+    ) -> Middleware: ...
 
 
 @asynccontextmanager
@@ -37,7 +44,7 @@ async def nullcontext(_: Service) -> AsyncIterator[None]:
 class Service(Generic[Message, R], LoggerMixin):
     """Logical group of consumers. Provides group (queue) name and handles versioning."""
 
-    default_middlewares: ClassVar[list[Middleware]] = []
+    default_middlewares: ClassVar[list[MiddlewareType]] = []
 
     def __init__(
         self,
@@ -46,11 +53,11 @@ class Service(Generic[Message, R], LoggerMixin):
         title: str | None = None,
         version: str = "0.1.0",
         description: str = "",
-        middlewares: list[Middleware] | None = None,
         lifespan: Lifespan = nullcontext,
         tags_metadata: list[dict[str, Any]] | None = None,
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
+        state: dict[type | str, Any] | None = None,
         **options: Any,
     ) -> None:
         self.broker = broker
@@ -61,22 +68,19 @@ class Service(Generic[Message, R], LoggerMixin):
         self.tags_metadata = tags_metadata or []
         self.consumer_group = ConsumerGroup()
         self.subscribe = self.consumer_group.subscribe
-        self.middlewares = self.default_middlewares
-        if middlewares:
-            self.middlewares.extend(middlewares)
-        if isinstance(broker, ResultBackend) and not any(
-            isinstance(m, ResultBackendMiddleware) for m in self.middlewares
-        ):
-            self.middlewares.append(ResultBackendMiddleware())
+        self.middlewares: list[Middleware] = []
+        for m in self.default_middlewares:
+            self.add_middleware(m)
         self.lifespan = lifespan
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
+        self.state = state or {}
         self.options = options
 
     def add_middleware(
-        self, middleware: type[Middleware], *args: Any, **kwargs: Any
+        self, middleware: MiddlewareType[P], *args: P.args, **kwargs: P.kwargs
     ) -> None:
-        self.middlewares.append(middleware(*args, **kwargs))
+        self.middlewares.append(middleware(self, *args, **kwargs))
 
     @property
     def add_consumer_group(self) -> Callable[[ConsumerGroup], None]:
@@ -146,7 +150,9 @@ class Service(Generic[Message, R], LoggerMixin):
             await self.dispatch_after("consumer_start", consumer=consumer)
 
     async def run(self, enable_signal_handler: bool = True) -> None:
-        async with self.lifespan(self):
+        async with self.lifespan(self) as state:
+            if state:
+                self.state.update(state)
             try:
                 await self.connect()
                 async with anyio.create_task_group() as tg:
@@ -158,25 +164,26 @@ class Service(Generic[Message, R], LoggerMixin):
                     await self.disconnect()
 
     @asynccontextmanager
-    async def context(self) -> AsyncIterator[None]:
-        task = asyncio.create_task(self.run(enable_signal_handler=False))
-        await asyncio.sleep(0)
-        yield
-        with suppress(asyncio.CancelledError):
-            task.cancel()
-            await task
+    async def context(self, enable_signal_handler: bool = False) -> AsyncIterator[None]:
+        async with self.lifespan(self) as state:
+            if state:
+                self.state.update(state)
+            try:
+                await self.connect()
+                async with anyio.create_task_group() as tg:
+                    if enable_signal_handler:
+                        tg.start_soon(self.watch_for_signals, tg.cancel_scope)
+                    await self.start_consumers(tg)
+                    yield
+            finally:
+                with anyio.move_on_after(5, shield=True):
+                    await self.disconnect()
 
     async def watch_for_signals(self, scope: CancelScope) -> None:
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
             async for signum in signals:
                 self.logger.info("Received signal %s", signum.name)
                 scope.cancel()
-
-    async def get_result(self, message_id: ID) -> Result | None:
-        if not isinstance(self.broker, ResultBackend):
-            msg = f"Broker {type(self.broker)} does not support results"
-            raise TypeError(msg)
-        return await self.broker.get_result(f"{self.name}:{message_id}")
 
     async def _dispatch(self, event: str, **kwargs: Any) -> None:
         message = kwargs.get("message")
@@ -185,12 +192,22 @@ class Service(Generic[Message, R], LoggerMixin):
                 middleware.requires is not None
                 and not isinstance(message, middleware.requires)
             ):
+                self.logger.debug(
+                    "Skipping event %s for middleware %s",
+                    event,
+                    type(middleware).__name__,
+                )
                 continue
             method = getattr(middleware, event, None)
             if method is None:
+                self.logger.debug(
+                    "Method %s not found in middleware %s",
+                    event,
+                    type(middleware).__name__,
+                )
                 continue
 
-            await method(service=self, **kwargs)
+            await method(**kwargs)
 
     async def dispatch_before(self, event: str, **kwargs: Any) -> None:
         await self._dispatch(f"before_{event}", **kwargs)

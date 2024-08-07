@@ -187,16 +187,15 @@ class RetryMiddleware(Middleware[CloudEventType]):
 
     def __init__(
         self,
-        delay_header: str = "x-delay",
+        service: Service,
         default_retry_strategy: RetryStrategy = MaxAge(max_age=timedelta(hours=6)),
     ) -> None:
-        self.delay_header = delay_header
+        super().__init__(service)
         self.default_retry_strategy = default_retry_strategy
 
     async def after_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         exc: Exception | None = None,
@@ -209,4 +208,4 @@ class RetryMiddleware(Middleware[CloudEventType]):
             "retry_strategy",
             self.default_retry_strategy,
         )
-        retry_strategy.maybe_retry(service=service, message=message, exc=exc)
+        retry_strategy.maybe_retry(service=self.service, message=message, exc=exc)

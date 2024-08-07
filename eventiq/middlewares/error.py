@@ -15,12 +15,14 @@ if TYPE_CHECKING:
 class ErrorHandlerMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
-        errors: type[Exception] | tuple[type[Exception]],
+        service: Service,
         callback: Callable[
             [Service, Consumer, CloudEventType, Exception | None],
             Awaitable[Any],
         ],
+        errors: type[Exception] | tuple[type[Exception]] = Exception,
     ) -> None:
+        super().__init__(service)
         if not asyncio.iscoroutinefunction(callback):
             callback = to_async(callback)
         self.callback = callback
@@ -29,11 +31,10 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
     async def after_process_message(
         self,
         *,
-        service: Service,
         consumer: Consumer,
         message: CloudEventType,
         exc: Exception | None = None,
         **_: Any,
     ) -> None:
         if exc and isinstance(exc, self.exc):
-            await self.callback(service, consumer, message, exc)
+            await self.callback(self.service, consumer, message, exc)

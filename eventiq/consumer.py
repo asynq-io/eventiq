@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import socket
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -15,18 +14,19 @@ from typing import (
 from uuid import uuid4
 
 import anyio
-from typing_extensions import TypedDict, Unpack
+from typing_extensions import Concatenate, TypedDict, Unpack
 
+from .dependencies import resolved_func
 from .logging import get_logger
-from .types import CloudEventType, Decoder, Parameter, Timeout
+from .types import CloudEventType, Decoder, Fn, Parameter, Timeout
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from anyio.streams.memory import MemoryObjectSendStream
 
     from .models import Publishes
-
-Fn = Callable[[CloudEventType], Awaitable[Any]]
 
 
 class Consumer(ABC, Generic[CloudEventType]):
@@ -74,9 +74,13 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.options: dict[str, Any] = options
         self.logger = get_logger(__name__, self.name)
 
-    @abstractmethod
-    async def process(self, message: CloudEventType) -> Any:
-        raise NotImplementedError
+    if TYPE_CHECKING:
+        process: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
+    else:
+
+        @abstractmethod
+        async def process(self, message: CloudEventType) -> Any:
+            raise NotImplementedError
 
 
 class FnConsumer(Consumer[CloudEventType]):
@@ -94,7 +98,7 @@ class FnConsumer(Consumer[CloudEventType]):
             extra["description"] = fn.__doc__ or ""
         if not is_async_callable(fn):
             fn = to_async(fn)
-        self.fn = fn
+        self.fn = resolved_func(fn)
         super().__init__(**extra)
 
     async def process(self, message: CloudEventType) -> Any:
@@ -111,6 +115,7 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
             extra["description"] = type(self).__doc__ or ""
 
         super().__init__(**extra)
+        self.process = resolved_func(self.process)
 
 
 class ChannelConsumer(Consumer[CloudEventType]):
