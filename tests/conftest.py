@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -93,7 +93,8 @@ def ce(service) -> CloudEvent:
 
 @pytest.fixture()
 def mock_consumer():
-    mock = AsyncMock()
+    temp_mock = AsyncMock()
+    mock = MagicMock(return_value=temp_mock())
     mock.__annotations__ = {"message": CloudEvent, "return": None}
     mock.__name__ = "mock_consumer"
     return mock

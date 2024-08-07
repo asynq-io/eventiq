@@ -13,6 +13,5 @@ def test_service(service: Service):
 async def test_consumer_called(
     running_service: Service, ce: CloudEvent, mock_consumer: Any
 ):
-    # publishing event, returns a dict with topics and events (Futures)
     await running_service.publish(ce)
-    mock_consumer.assert_awaited_once_with(ce)
+    mock_consumer.assert_called_once_with(ce)
