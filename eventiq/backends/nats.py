@@ -268,7 +268,7 @@ class JetStreamBroker(
                         for message in messages:
                             await send_stream.send(message)
                     except FetchTimeoutError:  # noqa: PERF203
-                        self.logger.info("Fetch timeout")
+                        pass
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
