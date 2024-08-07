@@ -142,8 +142,9 @@ class Service(Generic[Message, R], LoggerMixin):
         async with self.lifespan(self) as state:
             if state:
                 self.state.update(state)
+
+            await self.connect()
             try:
-                await self.connect()
                 async with anyio.create_task_group() as tg:
                     if enable_signal_handler:
                         tg.start_soon(self.watch_for_signals, tg.cancel_scope)
@@ -213,6 +214,7 @@ class Service(Generic[Message, R], LoggerMixin):
             consumer.timeout or self.broker.default_consumer_timeout,
         )
         decoder = consumer.decoder or self.broker.decoder
+
         async with receive_stream:
             async for raw_message in receive_stream:
                 await self._process(

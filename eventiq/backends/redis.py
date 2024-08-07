@@ -72,13 +72,18 @@ class RedisBroker(
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
     ) -> None:
+        message = None
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
-            async with send_stream:
-                while True:
-                    message = await sub.get_message(ignore_subscribe_messages=True)
-                    if message:
-                        await send_stream.send(message)
+            try:
+                async with send_stream:
+                    while True:
+                        message = await sub.get_message(ignore_subscribe_messages=True)
+                        if message:
+                            await send_stream.send(message)
+            finally:
+                if message:
+                    await self.nack(message)
 
     async def disconnect(self) -> None:
         if self._redis:

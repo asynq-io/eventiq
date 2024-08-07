@@ -106,15 +106,14 @@ class RabbitmqBroker(
             "queue_options",
             self.queue_options,
         )
-        is_durable = not consumer.dynamic
-        options.setdefault("durable", is_durable)
+        if not consumer.dynamic:
+            options["durable"] = True
         queue = await channel.declare_queue(name=f"{group}:{consumer.name}", **options)
         await queue.bind(self.exchange, routing_key=consumer.topic)
         try:
             async with send_stream, queue.iterator() as q:
                 async for message in q:
                     await send_stream.send(message)
-
         finally:
             with move_on_after(1, shield=True):
                 if consumer.dynamic:

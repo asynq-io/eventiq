@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from abc import ABC
 from datetime import timedelta, timezone
-from typing import TYPE_CHECKING, Annotated, Any, Callable, NoReturn
+from typing import TYPE_CHECKING, Annotated, Any, Callable
 
 import anyio
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
-from nats.js.errors import KeyNotFoundError
+from nats.js.errors import FetchTimeoutError, KeyNotFoundError
 from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
@@ -69,7 +69,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
         async def wrapped(error: Exception | None = None) -> None:
             self.logger.warning(message)
             if error:
-                self.logger.exception("", exc_info=error)
+                self.logger.error(error)
 
         return wrapped
 
@@ -101,7 +101,8 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
             await self.client.connect(self.url, **self.connection_options)
 
     async def disconnect(self) -> None:
-        await self.client.close()
+        if self.client.is_connected:
+            await self.client.close()
 
     async def flush(self) -> None:
         await self.client.flush()
@@ -184,9 +185,6 @@ class JetStreamBroker(
         self.kv_options = kv_options or {}
         self._kv: KeyValue | None = None
 
-    async def connect(self) -> None:
-        await super().connect()
-
     async def init_storage(self) -> None:
         self._kv = await self.js.create_key_value(**self.kv_options)
 
@@ -235,42 +233,43 @@ class JetStreamBroker(
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
-    ) -> NoReturn:
-        config = consumer.options.get("config", ConsumerConfig())
-
-        if config.ack_wait is None:
-            ack_wait = (
-                to_float(consumer.timeout) or self.default_consumer_timeout
-            ) + 30
-            config.ack_wait = (
-                ack_wait  # consumer timeout + 30s for any middleware/ack code
-            )
+    ) -> None:
+        config_kwargs = {
+            "ack_wait": (to_float(consumer.timeout) or self.default_consumer_timeout)
+            + 30,
+            "max_ack_pending": 10_000,
+        }
+        for key in ConsumerConfig.__dataclass_fields__:
+            if key in consumer.options:
+                config_kwargs[key] = consumer.options[key]
+        config = ConsumerConfig(**config_kwargs)
         batch = consumer.options.get("batch", consumer.concurrency * 2)
-
-        subscription = await self.js.pull_subscribe(
-            subject=self.format_topic(consumer.topic),
-            durable=f"{group}:{consumer.name}",
-            config=config,
-        )
+        try:
+            subscription = await self.js.pull_subscribe(
+                subject=self.format_topic(consumer.topic),
+                durable=f"{group}:{consumer.name}",
+                config=config,
+            )
+        except Exception as e:
+            self.logger.exception("Error in sender", exc_info=e)
+            return
         messages = []
         try:
             async with send_stream:
                 while True:
-                    messages = await subscription.fetch(
-                        batch=batch,
-                        timeout=None,
-                    )
-                    for message in messages:
-                        await send_stream.send(message)
+                    try:
+                        messages = await subscription.fetch(
+                            batch=batch,
+                            timeout=10,
+                            heartbeat=0.1,
+                        )
+                        for message in messages:
+                            await send_stream.send(message)
+                    except FetchTimeoutError:  # noqa: PERF203
+                        self.logger.info("Fetch timeout")
         finally:
-            self.logger.info("Stopping sender for consumer %s", consumer.name)
-            if messages:
-                self.logger.info("Rejecting %d messages", len(messages))
-            with anyio.move_on_after(2, shield=True):
-                for message in messages:
-                    await self.nack(message)
-                if consumer.dynamic:
-                    await subscription.unsubscribe()
+            if consumer.dynamic:
+                await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:

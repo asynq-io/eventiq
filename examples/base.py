@@ -7,8 +7,7 @@ from eventiq.backends.nats import JetStreamBroker
 class SendMessageMiddleware(Middleware):
     async def after_broker_connect(self):
         print(f"After service start, running with {service.broker}")
-        await asyncio.sleep(10)
-        for i in range(100):
+        for i in range(1, 100):
             message = CloudEvent.new({"counter": i}, topic="test.topic")
             await self.service.publish(message)
         print("Published messages(s)")
@@ -25,4 +24,5 @@ service.add_middleware(SendMessageMiddleware)
 
 @service.subscribe(topic="test.topic", concurrency=10)
 async def example_run(message: CloudEvent):
-    print(f"Received Message {message.id} with data: {message.data}")
+    print("Received Message", message.id, "with data:", message.data)
+    await asyncio.sleep(10)
