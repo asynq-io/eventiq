@@ -95,6 +95,7 @@ def ce(service) -> CloudEvent:
 def mock_consumer():
     mock = AsyncMock()
     mock.__annotations__ = {"message": CloudEvent, "return": None}
+    mock.__name__ = "mock_consumer"
     return mock
 
 
