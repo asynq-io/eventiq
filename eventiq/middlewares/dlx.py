@@ -5,16 +5,18 @@ from typing import TYPE_CHECKING, Any
 from eventiq.middleware import CloudEventType, Middleware
 
 if TYPE_CHECKING:
-    from eventiq import Consumer
+    from eventiq import Consumer, Service
     from eventiq.exceptions import Fail
 
 
 class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
+        service: Service,
         topic: str = "dlx",
         **kwargs: Any,
     ) -> None:
+        super().__init__(service)
         self.topic = topic
         self.kwargs = kwargs
 

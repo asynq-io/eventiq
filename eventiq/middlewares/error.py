@@ -17,8 +17,7 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         self,
         service: Service,
         callback: Callable[
-            [Service, Consumer, CloudEventType, Exception | None],
-            Awaitable[Any],
+            [Service, Consumer, CloudEventType, Exception | None], Awaitable[Any]
         ],
         errors: type[Exception] | tuple[type[Exception]] = Exception,
     ) -> None:
@@ -33,8 +32,8 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         *,
         consumer: Consumer,
         message: CloudEventType,
+        result: Any | None = None,
         exc: Exception | None = None,
-        **_: Any,
     ) -> None:
         if exc and isinstance(exc, self.exc):
             await self.callback(self.service, consumer, message, exc)
