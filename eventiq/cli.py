@@ -128,7 +128,7 @@ def send(
         finally:
             await svc.broker.disconnect()
 
-    message_data = svc.broker.decoder.decode(data)
+    message_data = svc.decoder.decode(data)
     message = CloudEvent.new(message_data, type=type, topic=topic)
     anyio.run(connect_and_send, message)
 

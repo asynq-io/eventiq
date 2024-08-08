@@ -96,7 +96,7 @@ def get_topic_parameters(
 
 def generate_receive_operation(
     consumer: Consumer,
-    broker: Broker,
+    service: Service,
     channels_params: dict[str, Any],
     spec: AsyncAPI,
     tags: dict[str, Tag],
@@ -106,11 +106,16 @@ def generate_receive_operation(
     params = get_topic_parameters(consumer.topic, consumer.parameters)
     for k, v in params.items():
         channels_params[channel_id].setdefault(k, v)
+    content_type = (
+        consumer.decoder.CONTENT_TYPE
+        if consumer.decoder
+        else service.decoder.CONTENT_TYPE
+    )
     message = Message(
         name=event_type,
         title=event_type,
         description=consumer.event_type.__doc__,
-        contentType=broker.encoder.CONTENT_TYPE,
+        contentType=content_type,
         payload=Reference(ref=f"#/components/schemas/{event_type}"),
         **consumer.asyncapi_extra.get("message", {}),
     )
@@ -122,7 +127,7 @@ def generate_receive_operation(
 
     channel = Channel(
         address=consumer.topic,
-        servers=[Reference(ref=f"#/servers/{broker.name}")],
+        servers=[Reference(ref=f"#/servers/{service.broker.name}")],
         messages={
             event_type: Reference(ref=f"#/channels/{channel_id}/messages/{event_type}"),
         },
@@ -204,7 +209,7 @@ def populate_spec(service: Service, spec: AsyncAPI) -> None:
         )
         generate_receive_operation(
             consumer,
-            service.broker,
+            service,
             channels_params,
             spec,
             tags,
@@ -229,7 +234,7 @@ def get_async_api_spec(service: Service) -> AsyncAPI:
             version=service.version,
             **service.async_api_extra,
         ),
-        defaultContentType=service.broker.encoder.CONTENT_TYPE,
+        defaultContentType=service.encoder.CONTENT_TYPE,
         servers={
             service.broker.name: Server(
                 protocol=service.broker.protocol,

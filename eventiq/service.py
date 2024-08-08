@@ -8,8 +8,10 @@ import anyio
 from anyio import CancelScope, create_memory_object_stream
 from pydantic import ValidationError
 
-from .broker import Broker, R
+from .broker import Broker, BulkMessage, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
+from .decoder import DEFAULT_DECODER
+from .encoder import DEFAULT_ENCODER
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
@@ -17,7 +19,7 @@ from .types import Decoder, Encoder, Lifespan, Message, MiddlewareType, P
 from .utils import to_float
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from anyio.abc import TaskGroup
     from anyio.streams.memory import MemoryObjectReceiveStream
@@ -39,6 +41,8 @@ class Service(Generic[Message, R], LoggerMixin):
         self,
         name: str,
         broker: Broker[Message, R],
+        encoder: Encoder = DEFAULT_ENCODER,
+        decoder: Decoder = DEFAULT_DECODER,
         title: str | None = None,
         version: str = "0.1.0",
         description: str = "",
@@ -51,6 +55,8 @@ class Service(Generic[Message, R], LoggerMixin):
     ) -> None:
         self.broker = broker
         self.name = name
+        self.encoder = encoder
+        self.decoder = decoder
         self.title = title or name.title()
         self.version = version
         self.description = description
@@ -98,16 +104,63 @@ class Service(Generic[Message, R], LoggerMixin):
     async def publish(
         self,
         message: CloudEvent,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
         encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> R:
+        headers = headers or {}
+        headers.update(message.headers)
         if not message.source:
             message.source = self.name
+        encoder = encoder or self.encoder
+        message.content_type = encoder.CONTENT_TYPE
+        headers["Content-Type"] = encoder.CONTENT_TYPE
+        topic = topic or message.topic
+        body = encoder.encode(message)
+        message_kwargs = message.model_dump()
+        message_kwargs.update(kwargs)
 
-        await self.dispatch_before("publish", message=message)
-        res = await self.broker.publish(message, encoder=encoder, **kwargs)
-        await self.dispatch_after("publish", message=message)
+        await self.dispatch_before(
+            "publish", message=message, headers=headers, **kwargs
+        )
+        res = await self.broker.publish(topic, body, headers=headers, **message_kwargs)
+        await self.dispatch_after("publish", message=message, headers=headers, **kwargs)
         return res
+
+    async def bulk_publish(
+        self,
+        messages: Sequence[CloudEvent],
+        *,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> None:
+        encoder = encoder or self.encoder
+        headers = headers or {}
+        headers["Content-Type"] = encoder.CONTENT_TYPE
+        bulk_messages: list[BulkMessage] = []
+        for message in messages:
+            message.content_type = encoder.CONTENT_TYPE
+            if not message.source:
+                message.source = self.name
+            await self.dispatch_before(
+                "publish", message=message, headers=headers, **kwargs
+            )
+            body = encoder.encode(message)
+            message_headers = {**headers, **message.headers}
+            message_kwargs = message.model_dump()
+            message_kwargs.update(kwargs)
+            msg = BulkMessage(message.topic, body, message_headers, message_kwargs)
+            bulk_messages.append(msg)
+
+        await self.broker.bulk_publish(bulk_messages, topic=topic)
+
+        for message, bulk_msg in zip(messages, bulk_messages):
+            await self.dispatch_after(
+                "publish", message=message, headers=bulk_msg.headers, **bulk_msg.kwargs
+            )
 
     async def connect(self) -> None:
         await self.dispatch_before("broker_connect")
@@ -213,7 +266,7 @@ class Service(Generic[Message, R], LoggerMixin):
         consumer_timeout = to_float(
             consumer.timeout or self.broker.default_consumer_timeout,
         )
-        decoder = consumer.decoder or self.broker.decoder
+        decoder = consumer.decoder or self.decoder
 
         async with receive_stream:
             async for raw_message in receive_stream:

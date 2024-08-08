@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import MagicMock
 
 from eventiq import CloudEvent, Service
 from eventiq.backends.stub import StubBroker
@@ -15,3 +16,11 @@ async def test_consumer_called(
 ):
     await running_service.publish(ce)
     mock_consumer.assert_called_once_with(ce)
+
+
+async def test_bulk_publish(
+    running_service: Service, ce: CloudEvent, mock_consumer: MagicMock
+):
+    messages = [ce] * 10
+    await running_service.bulk_publish(messages)
+    assert mock_consumer.call_count == 10

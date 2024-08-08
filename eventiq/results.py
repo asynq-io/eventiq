@@ -23,11 +23,11 @@ class ResultBackend(Broker[Message, R], ABC):
         pass
 
     @abstractmethod
-    async def store_result(self, key: str, result: AnyModel) -> None:
+    async def store_result(self, key: str, result: bytes) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    async def get_result(self, key: str) -> AnyModel | None:
+    async def get_result(self, key: str) -> bytes | None:
         raise NotImplementedError
 
 
@@ -50,8 +50,9 @@ class ResultBackendMiddleware(Middleware):
     ) -> None:
         if not all([result, exc is None, consumer.options.get("store_results")]):
             return
-
+        encoder = consumer.options.get("encoder", self.service.encoder)
+        data = encoder.encode(AnyModel(result))
         await self.result_backend.store_result(
             f"{self.service.name}:{message.id}",
-            AnyModel(result),
+            data,
         )

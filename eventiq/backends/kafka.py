@@ -3,22 +3,21 @@ from __future__ import annotations
 from datetime import timedelta
 from itertools import chain
 from typing import TYPE_CHECKING, Annotated, Any
+from uuid import uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio import move_on_after
 from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import UrlBroker
-from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import utc_now
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
-    from eventiq import CloudEvent, Consumer
-    from eventiq.types import DecodedMessage, Encoder
-
+    from eventiq import Consumer
+    from eventiq.types import DecodedMessage
 
 KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
 
@@ -28,9 +27,10 @@ class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
 
 
 class KafkaBroker(UrlBroker[ConsumerRecord, None]):
-    """Kafka backend
+    """
+    Kafka backend
     :param consumer_options: extra options (defaults) for AIOKafkaConsumer
-    :param kwargs: Broker base class parameters.
+    :param kwargs: Broker base class parameters
     """
 
     WILDCARD_MANY = "*"
@@ -114,10 +114,9 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
             await subscriber.commit(
                 {
                     TopicPartition(
-                        raw_message.topic,
-                        raw_message.partition,
-                    ): raw_message.offset + 1,
-                },
+                        raw_message.topic, raw_message.partition
+                    ): raw_message.offset + 1
+                }
             )
 
     async def nack(self, raw_message: ConsumerRecord, delay: int | None = None) -> None:
@@ -130,37 +129,33 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
     @property
     def publisher(self) -> AIOKafkaProducer:
         if self._publisher is None:
-            msg = "Broker not connected"
-            raise BrokerError(msg)
+            raise self.connection_error
         return self._publisher
 
     async def connect(self) -> None:
         if self._publisher is None:
-            publisher = AIOKafkaProducer(
-                bootstrap_servers=self.url,
-                **self.connection_options,
+            _publisher = AIOKafkaProducer(
+                bootstrap_servers=self.url, **self.connection_options
             )
-            await publisher.start()
-            self._publisher = publisher
+            self._publisher = _publisher
+            await _publisher.start()
 
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
-        key: Any | None = None,
-        partition: Any | None = None,
-        headers: dict[str, str] | None = None,
-        timestamp_ms: int | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
         **kwargs: Any,
     ) -> None:
-        data = self._encode_message(message, encoder)
-        timestamp_ms = timestamp_ms or int(message.time.timestamp() * 1000)
-        key = key or getattr(message, "key", str(message.id))
-        headers = headers or {}
-        headers.setdefault("Content-Type", self.encoder.CONTENT_TYPE)
+        timestamp_ms = kwargs.get("timestamp_ms")
+        if "time" in kwargs and timestamp_ms is None:
+            timestamp_ms = int(kwargs["time"].timestamp() * 1000)
+        partition = kwargs.get("partition")
+        key = kwargs.get("key") or str(kwargs.get("id", uuid4()))
         await self.publisher.send(
-            topic=message.topic,
-            value=data,
+            topic=topic,
+            value=body,
             key=key,
             partition=partition,
             headers=headers,

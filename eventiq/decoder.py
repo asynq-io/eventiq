@@ -7,6 +7,8 @@ from .types import AnyType, Decoder, RawData, T
 
 
 class JsonDecoder:
+    CONTENT_TYPE = "application/json"
+
     def __init__(self, strict: bool = False, context: Any = None) -> None:
         self.strict = strict
         self.context = context

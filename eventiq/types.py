@@ -60,6 +60,8 @@ class Encoder(Protocol):
 
 @runtime_checkable
 class Decoder(Protocol[T]):
+    CONTENT_TYPE: str
+
     @overload
     def decode(self, data: RawData, as_type: type[T]) -> T: ...
 
