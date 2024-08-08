@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from itertools import chain
 from typing import TYPE_CHECKING, Annotated, Any
+from weakref import WeakValueDictionary
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio import move_on_after
@@ -47,7 +48,9 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         super().__init__(**kwargs)
         self.consumer_options = consumer_options or {}
         self._publisher = None
-        self._subcsribers: dict[int, AIOKafkaConsumer] = {}
+        self._subcsribers: WeakValueDictionary[int, AIOKafkaConsumer] = (
+            WeakValueDictionary()
+        )
 
     @staticmethod
     def decode_message(raw_message: ConsumerRecord) -> DecodedMessage:

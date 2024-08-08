@@ -6,7 +6,7 @@ from eventiq.backends.nats import JetStreamBroker
 
 class SendMessageMiddleware(Middleware):
     async def after_broker_connect(self):
-        print(f"After service start, running with {service.broker}")
+        print(f"After service start, running with {self.service.broker}")
         for i in range(1, 5):
             message = CloudEvent.new({"counter": i}, topic="test.topic")
             await self.service.publish(message)

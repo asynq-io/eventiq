@@ -21,7 +21,7 @@ from eventiq.utils import to_float, utc_now
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
-    from eventiq.types import DecodedMessage
+    from eventiq.types import ID, DecodedMessage
 
 NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
 
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
     from nats.js.kv import KeyValue
 
-    from eventiq import CloudEvent, Consumer
+    from eventiq import Consumer
 
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
@@ -108,9 +108,6 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     def is_connected(self) -> bool:
         return self.client.is_connected
 
-    def get_asyncapi_bindings(self, event_type: type[CloudEvent]) -> dict[str, Any]:
-        return {"queue": event_type.get_default_topic(), "bindingVersion": "0.1.0"}
-
     async def ack(self, raw_message: NatsMsg) -> None:
         await raw_message.ack()
 
@@ -136,7 +133,7 @@ class NatsBroker(AbstractNatsBroker[None]):
                 async for message in subscription.messages:
                     await send_stream.send(message)
         finally:
-            with anyio.move_on_after(2, shield=True):
+            with anyio.move_on_after(1, shield=True):
                 if consumer.dynamic:
                     await subscription.unsubscribe()
             self.logger.info("Sender finished for %s", consumer.name)
@@ -207,13 +204,13 @@ class JetStreamBroker(
         body: bytes,
         *,
         headers: dict[str, str],
-        message_id: str | None = None,
+        message_id: ID | None = None,
         timeout: float | None = None,
         stream: str | None = None,
         **kwargs: Any,
     ) -> api.PubAck:
         if "Nats-Msg-Id" not in headers and message_id:
-            headers["Nats-Msg-Id"] = message_id
+            headers["Nats-Msg-Id"] = str(message_id)
         response = await self.js.publish(
             topic, payload=body, timeout=timeout, stream=stream, headers=headers
         )
@@ -239,16 +236,11 @@ class JetStreamBroker(
         batch = consumer.options.get("batch", consumer.concurrency * 2)
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", 0.1)
-        try:
-            subscription = await self.js.pull_subscribe(
-                subject=self.format_topic(consumer.topic),
-                durable=f"{group}:{consumer.name}",
-                config=config,
-            )
-        except Exception as e:
-            self.logger.exception("Error in sender", exc_info=e)
-            return
-        messages = []
+        subscription = await self.js.pull_subscribe(
+            subject=self.format_topic(consumer.topic),
+            durable=f"{group}:{consumer.name}",
+            config=config,
+        )
         try:
             async with send_stream:
                 while True:
