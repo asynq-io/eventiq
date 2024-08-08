@@ -4,10 +4,12 @@ import asyncio
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from eventiq.broker import Broker
 from eventiq.settings import BrokerSettings
+from eventiq.utils import utc_now
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
@@ -50,8 +52,16 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         self.topics: dict[str, asyncio.Queue[StubMessage]] = defaultdict(
             self.queue_factory,
         )
-        self._connected = False
         self.wait_on_publish = wait_on_publish
+        self._delay_queue: asyncio.Queue[tuple[StubMessage, datetime]] = asyncio.Queue(
+            1000
+        )
+        self._connected = False
+        self._delay_task: asyncio.Task | None = None
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
 
     def queue_factory(self) -> asyncio.Queue[StubMessage]:
         return asyncio.Queue(maxsize=self.queue_max_size)
@@ -75,11 +85,25 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
                 message = await queue.get()
                 await send_stream.send(message)
 
+    async def _delay_queue_worker(self) -> None:
+        while self._connected:
+            raw_message, not_before = await self._delay_queue.get()
+            if not_before > utc_now():
+                await self._delay_queue.put((raw_message, not_before))
+            else:
+                await raw_message.queue.put(raw_message)
+            self._delay_queue.task_done()
+            await asyncio.sleep(0.1)
+
     async def connect(self) -> None:
         self._connected = True
+        self._delay_task = asyncio.create_task(self._delay_queue_worker())
+        await asyncio.sleep(0)
 
     async def disconnect(self) -> None:
         self._connected = False
+        if self._delay_task:
+            self._delay_task.cancel()
         self.topics.clear()
 
     async def publish(
@@ -106,10 +130,10 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         raw_message.event.set()
 
     async def nack(self, raw_message: StubMessage, delay: int | None = None) -> None:
-        if delay:
-            await asyncio.sleep(delay)
-        await raw_message.queue.put(raw_message)
-
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
+        if delay and delay > 0:
+            not_before = utc_now() + timedelta(seconds=delay)
+            await self._delay_queue.put((raw_message, not_before))
+        else:
+            await raw_message.queue.put(raw_message)
+        raw_message.queue.task_done()
+        raw_message.event.set()
