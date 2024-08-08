@@ -12,8 +12,8 @@ from eventiq.settings import BrokerSettings
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
-    from eventiq import CloudEvent, Consumer
-    from eventiq.types import DecodedMessage, Encoder
+    from eventiq import Consumer
+    from eventiq.types import DecodedMessage
 
 
 @dataclass
@@ -62,7 +62,6 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
     @staticmethod
     def decode_message(raw_message: StubMessage) -> DecodedMessage:
         return raw_message.data, raw_message.headers
-        return super().decode_message(raw_message)
 
     async def sender(
         self,
@@ -85,19 +84,17 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
 
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
         **kwargs: Any,
     ) -> dict[str, asyncio.Event]:
-        data = self._encode_message(message, encoder)
         response = {}
-        message_topic = self.format_topic(message.topic)
-        for topic, queue in self.topics.items():
-            if re.fullmatch(message_topic, topic):
+        for target_topic, queue in self.topics.items():
+            if re.fullmatch(topic, target_topic):
                 event = asyncio.Event()
-                msg = StubMessage(
-                    data=data, queue=queue, event=event, headers=message.headers
-                )
+                msg = StubMessage(data=body, queue=queue, event=event, headers=headers)
                 await queue.put(msg)
                 response[topic] = event
                 if self.wait_on_publish:

@@ -76,7 +76,7 @@ pip install 'eventiq[broker]'
 
 ```Python
 import asyncio
-from eventiq import Service, Middleware, CloudEvent
+from eventiq import Service, Middleware, CloudEvent, GenericConsumer
 from eventiq.backends.nats import JetStreamBroker
 
 class SendMessageMiddleware(Middleware):
@@ -100,6 +100,13 @@ service = Service(
 @service.subscribe(topic="test.topic")
 async def example_run(message: CloudEvent):
     print(f"Received Message {message.id} with data: {message.data}")
+
+@service.subscribe(topic="test.topic2")
+class MyConsumer(GenericConsumer[CloudEvent]):
+    async def process(self, message: CloudEvent):
+        print(f"Received Message {message.id} with data: {message.data}")
+        await self.publish(CloudEvent(topic="test.topic", data={"response": "ok"})
+
 ```
 
 Run with

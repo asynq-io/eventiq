@@ -14,7 +14,7 @@ from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
-from eventiq.results import AnyModel, ResultBackend
+from eventiq.results import ResultBackend
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float, utc_now
 
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from nats.js.kv import KeyValue
 
     from eventiq import CloudEvent, Consumer
-    from eventiq.types import Encoder
 
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
@@ -78,10 +77,6 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     @staticmethod
     def decode_message(raw_message: NatsMsg) -> DecodedMessage:
         return raw_message.data, raw_message.headers
-
-    @staticmethod
-    def get_message_data(raw_message: NatsMsg) -> bytes:
-        return raw_message.data
 
     @staticmethod
     def get_message_metadata(raw_message: NatsMsg) -> dict[str, str]:
@@ -148,15 +143,14 @@ class NatsBroker(AbstractNatsBroker[None]):
 
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
         **kwargs: Any,
     ) -> None:
-        data = self._encode_message(message, encoder)
         reply = kwargs.get("reply", "")
-        headers = message.headers
-        headers.setdefault("Content-Type", message.content_type)
-        await self.client.publish(message.topic, data, headers=headers, reply=reply)
+        await self.client.publish(topic, body, headers=headers, reply=reply)
         if self._auto_flush or kwargs.get("flush"):
             await self.flush()
 
@@ -173,6 +167,7 @@ class JetStreamBroker(
     """
 
     Settings = JetStreamSettings
+    kv_error = "KeyVal not initialized"
 
     def __init__(
         self,
@@ -193,38 +188,34 @@ class JetStreamBroker(
     @property
     def kv(self) -> KeyValue:
         if self._kv is None:
-            err = "KeyVal not initialized"
-            raise BrokerError(err)
+            raise BrokerError(self.kv_error)
         return self._kv
 
-    async def get_result(self, key: str) -> Any:
+    async def get_result(self, key: str) -> bytes | None:
         try:
             data = await self.kv.get(key)
-            if data.value:
-                return self.decoder.decode(data.value)
+            return data.value  # noqa: TRY300
         except KeyNotFoundError:
             self.logger.warning("Key %s not found", key)
 
-    async def store_result(self, key: str, result: AnyModel) -> None:
-        await self.kv.put(key, self.encoder.encode(result))
+    async def store_result(self, key: str, result: bytes) -> None:
+        await self.kv.put(key, result)
 
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
+        message_id: str | None = None,
+        timeout: float | None = None,
+        stream: str | None = None,
         **kwargs: Any,
     ) -> api.PubAck:
-        encoder = encoder or self.encoder
-        data = encoder.encode(message)
-        headers = message.headers
-        headers.setdefault("Content-Type", message.content_type)
-        headers.setdefault("Nats-Msg-Id", str(message.id))
+        if "Nats-Msg-Id" not in headers and message_id:
+            headers["Nats-Msg-Id"] = message_id
         response = await self.js.publish(
-            subject=message.topic,
-            payload=data,
-            timeout=kwargs.get("timeout"),
-            stream=kwargs.get("stream"),
-            headers=headers,
+            topic, payload=body, timeout=timeout, stream=stream, headers=headers
         )
         if self._auto_flush:
             await self.flush()

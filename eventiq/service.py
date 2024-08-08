@@ -8,16 +8,27 @@ import anyio
 from anyio import CancelScope, create_memory_object_stream
 from pydantic import ValidationError
 
-from .broker import Broker, R
+from .broker import Broker, BulkMessage, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
+from .decoder import DEFAULT_DECODER
+from .encoder import DEFAULT_ENCODER
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
-from .types import Decoder, Encoder, Lifespan, Message, MiddlewareType, P
+from .types import (
+    Decoder,
+    Encoder,
+    Lifespan,
+    Message,
+    MiddlewareType,
+    P,
+    PreparedMessage,
+    Publisher,
+)
 from .utils import to_float
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from anyio.abc import TaskGroup
     from anyio.streams.memory import MemoryObjectReceiveStream
@@ -39,6 +50,8 @@ class Service(Generic[Message, R], LoggerMixin):
         self,
         name: str,
         broker: Broker[Message, R],
+        encoder: Encoder = DEFAULT_ENCODER,
+        decoder: Decoder = DEFAULT_DECODER,
         title: str | None = None,
         version: str = "0.1.0",
         description: str = "",
@@ -51,6 +64,8 @@ class Service(Generic[Message, R], LoggerMixin):
     ) -> None:
         self.broker = broker
         self.name = name
+        self.encoder = encoder
+        self.decoder = decoder
         self.title = title or name.title()
         self.version = version
         self.description = description
@@ -64,6 +79,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
         self.state = state or {}
+        self.state[Publisher] = self.publish
         self.options = options
 
     def add_middleware(
@@ -95,19 +111,75 @@ class Service(Generic[Message, R], LoggerMixin):
             ce.headers.update(headers)
         return await self.publish(ce, encoder=encoder)
 
+    def prepare_message(
+        self,
+        message: CloudEvent,
+        topic: str | None = None,
+        encoder: Encoder | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> PreparedMessage:
+        message_topic = topic or message.topic
+        encoder = encoder or self.encoder
+        if message.source is None:
+            message.source = self.name
+        message.content_type = encoder.CONTENT_TYPE
+        message.headers["Content-Type"] = encoder.CONTENT_TYPE
+        if topic:
+            message.headers["Destination"] = topic
+        if headers:
+            message.headers.update(headers)
+        body = encoder.encode(message)
+        message_kwargs = {
+            f"message_{k}": v
+            for k, v in message.model_dump(
+                exclude_none=True, by_alias=False, exclude={"topic", "data"}
+            ).items()
+        }
+        message_kwargs.update(kwargs)
+        return message_topic, body, message_kwargs
+
     async def publish(
         self,
         message: CloudEvent,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
         encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> R:
-        if not message.source:
-            message.source = self.name
-
-        await self.dispatch_before("publish", message=message)
-        res = await self.broker.publish(message, encoder=encoder, **kwargs)
-        await self.dispatch_after("publish", message=message)
+        message_topic, body, message_kwargs = self.prepare_message(
+            message, topic, encoder, headers=headers, **kwargs
+        )
+        topic = topic or message.topic
+        await self.dispatch_before("publish", message=message, **kwargs)
+        res = await self.broker.publish(
+            message_topic, body, headers=message.headers, **message_kwargs
+        )
+        await self.dispatch_after("publish", message=message, **kwargs)
         return res
+
+    async def bulk_publish(
+        self,
+        messages: Sequence[CloudEvent],
+        *,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> None:
+        bulk_messages: list[BulkMessage] = []
+        for message in messages:
+            message_topic, body, message_kwargs = self.prepare_message(
+                message, topic, encoder, headers=headers, **kwargs
+            )
+            await self.dispatch_before("publish", message=message, **kwargs)
+            msg = BulkMessage(message_topic, body, message.headers, message_kwargs)
+            bulk_messages.append(msg)
+
+        await self.broker.bulk_publish(bulk_messages, topic=topic)
+
+        for message in messages:
+            await self.dispatch_after("publish", message=message, **kwargs)
 
     async def connect(self) -> None:
         await self.dispatch_before("broker_connect")
@@ -121,6 +193,7 @@ class Service(Generic[Message, R], LoggerMixin):
 
     async def start_consumers(self, tg: TaskGroup) -> None:
         for consumer in self.consumers.values():
+            consumer.maybe_set_publisher(self.publish)
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
                 consumer.concurrency * 2,
@@ -213,7 +286,7 @@ class Service(Generic[Message, R], LoggerMixin):
         consumer_timeout = to_float(
             consumer.timeout or self.broker.default_consumer_timeout,
         )
-        decoder = consumer.decoder or self.broker.decoder
+        decoder = consumer.decoder or self.decoder
 
         async with receive_stream:
             async for raw_message in receive_stream:

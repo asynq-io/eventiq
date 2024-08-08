@@ -7,20 +7,20 @@ from aio_pika.abc import (
     AbstractExchange,
     AbstractIncomingMessage,
     AbstractRobustConnection,
+    DateType,
 )
 from aiormq.abc import ConfirmationFrameType
 from anyio import move_on_after
 from pydantic import AnyUrl, UrlConstraints
 
 from eventiq.broker import UrlBroker
-from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
-    from eventiq import CloudEvent, Consumer
-    from eventiq.types import DecodedMessage, Encoder
+    from eventiq import Consumer
+    from eventiq.types import DecodedMessage
 
 
 RabbitmqUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["amqp"])]
@@ -32,13 +32,14 @@ class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
 
 
 class RabbitmqBroker(
-    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]],
+    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]]
 ):
-    """RabbitMQ broker implementation, based on `aio_pika` library.
+    """
+    RabbitMQ broker implementation, based on `aio_pika` library.
     :param default_prefetch_count: default number of messages to prefetch (per queue)
     :param queue_options: additional queue options
     :param exchange_name: global exchange name
-    :param kwargs: Broker base class parameters.
+    :param kwargs: Broker base class parameters
     """
 
     Settings = RabbitMQSettings
@@ -64,15 +65,13 @@ class RabbitmqBroker(
     @property
     def connection(self) -> AbstractRobustConnection:
         if self._connection is None:
-            msg = "Not connected"
-            raise BrokerError(msg)
+            raise self.connection_error
         return self._connection
 
     @property
     def exchange(self) -> AbstractExchange:
         if self._exchange is None:
-            msg = "Not connected"
-            raise BrokerError(msg)
+            raise self.connection_error
         return self._exchange
 
     def should_nack(self, raw_message: AbstractIncomingMessage) -> bool:
@@ -80,40 +79,46 @@ class RabbitmqBroker(
 
     async def connect(self) -> None:
         self._connection = await aio_pika.connect_robust(
-            self.url,
-            **self.connection_options,
+            self.url, **self.connection_options
         )
         channel = await self.connection.channel()
         self._exchange = await channel.declare_exchange(
-            name=self.exchange_name,
-            type=aio_pika.ExchangeType.TOPIC,
-            durable=True,
+            name=self.exchange_name, type=aio_pika.ExchangeType.TOPIC, durable=True
         )
 
     async def disconnect(self) -> None:
         await self.connection.close()
 
+    @property
+    def is_connected(self) -> bool:
+        return not self.connection.is_closed
+
+    @staticmethod
+    def decode_message(raw_message: AbstractIncomingMessage) -> DecodedMessage:
+        return raw_message.body, {k: str(v) for k, v in raw_message.headers.items()}
+
+    @staticmethod
+    def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:
+        return {}
+
     async def sender(
-        self,
-        group: str,
-        consumer: Consumer,
-        send_stream: MemoryObjectSendStream,
+        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
     ) -> None:
         channel = await self.connection.channel()
         prefetch_count = consumer.concurrency * 2
         await channel.set_qos(prefetch_count=prefetch_count)
         options: dict[str, Any] = consumer.options.get(
-            "queue_options",
-            self.queue_options,
+            "queue_options", self.queue_options
         )
-        if not consumer.dynamic:
-            options["durable"] = True
+        is_durable = not consumer.dynamic
+        options.setdefault("durable", is_durable)
         queue = await channel.declare_queue(name=f"{group}:{consumer.name}", **options)
         await queue.bind(self.exchange, routing_key=consumer.topic)
         try:
             async with send_stream, queue.iterator() as q:
                 async for message in q:
                     await send_stream.send(message)
+
         finally:
             with move_on_after(1, shield=True):
                 if consumer.dynamic:
@@ -122,28 +127,48 @@ class RabbitmqBroker(
 
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
+        message_id: str | None = None,
+        message_content_type: str | None = None,
+        message_type: str | None = None,
+        message_time: DateType | None = None,
+        message_source: str | None = None,
+        timeout: float | None = None,
+        mandatory: bool = True,
+        immidiate: bool = False,
+        delivery_mode: aio_pika.DeliveryMode = aio_pika.DeliveryMode.PERSISTENT,
+        priority: int | None = None,
+        correlation_id: str | None = None,
+        reply_to: str | None = None,
+        expiration: DateType | None = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ) -> ConfirmationFrameType | None:
-        data = self._encode_message(message, encoder=encoder)
-        timeout = kwargs.get("timeout")
-        headers = message.headers
-        headers.setdefault("Content-Type", self.encoder.CONTENT_TYPE)
+        message_id = str(message_id) if message_id else None
         msg = aio_pika.Message(
+            body,
             headers=dict(headers),
-            body=data,
-            app_id=message.source,
-            content_type=message.content_type,
-            timestamp=message.time,
-            message_id=str(message.id),
-            type=message.type,
+            content_type=message_content_type,
             content_encoding="UTF-8",
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+            delivery_mode=delivery_mode,
+            priority=priority,
+            correlation_id=correlation_id,
+            reply_to=reply_to,
+            expiration=expiration,
+            message_id=message_id,
+            timestamp=message_time,
+            type=message_type,
+            user_id=user_id,
+            app_id=message_source,
         )
         return await self.exchange.publish(
             msg,
-            routing_key=message.topic,
+            routing_key=topic,
+            mandatory=mandatory,
+            immediate=immidiate,
             timeout=timeout,
         )
 
@@ -151,34 +176,6 @@ class RabbitmqBroker(
         await raw_message.ack()
 
     async def nack(
-        self,
-        raw_message: AbstractIncomingMessage,
-        delay: int | None = None,
+        self, raw_message: AbstractIncomingMessage, delay: int | None = None
     ) -> None:
         await raw_message.reject(requeue=True)
-
-    @property
-    def is_connected(self) -> bool:
-        return not self.connection.is_closed
-
-    @staticmethod
-    def decode_message(raw_message: AbstractIncomingMessage) -> DecodedMessage:
-        headers = {k: str(v) for k, v in raw_message.headers.items()}
-        return raw_message.body, headers
-
-    @staticmethod
-    def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:
-        d = {
-            k: getattr(raw_message, k, None)
-            for k in (
-                "cluster_id",
-                "consumer_tag",
-                "redelivered",
-                "message_count",
-                "routing_key",
-                "exchange",
-            )
-        }
-        return {
-            f"messaging.rabbitmq.{k}": str(v) for k, v in d.items() if v is not None
-        }

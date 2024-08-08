@@ -13,6 +13,7 @@ from eventiq.middleware import Middleware
 from eventiq.middlewares.dlx import DeadLetterQueueMiddleware
 from eventiq.middlewares.error import ErrorHandlerMiddleware
 from eventiq.middlewares.healthcheck import HealthCheckMiddleware
+from eventiq.middlewares.perf_counter import PerfCounterMiddleware
 from eventiq.middlewares.retries import RetryMiddleware
 from eventiq.utils import utc_now
 
@@ -45,6 +46,7 @@ def service(broker, middleware):
     svc.add_middleware(RetryMiddleware)
     svc.add_middleware(HealthCheckMiddleware)
     svc.add_middleware(ErrorHandlerMiddleware, callback=AsyncMock())
+    svc.add_middleware(PerfCounterMiddleware)
     return svc
 
 

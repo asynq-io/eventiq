@@ -3,15 +3,17 @@ from __future__ import annotations
 import inspect
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple, TypeVar
 from urllib.parse import urlparse
 
-from .decoder import DEFAULT_DECODER
-from .encoder import DEFAULT_ENCODER
+import anyio
+
+from eventiq.exceptions import BrokerConnectionError
+
 from .imports import import_from_string
 from .logging import LoggerMixin
 from .settings import BrokerSettings, UrlBrokerSettings
-from .types import DecodedMessage, Decoder, DefaultAction, Encoder, Message, Timeout
+from .types import DecodedMessage, DefaultAction, Message, Timeout
 from .utils import format_topic, to_float
 
 if TYPE_CHECKING:
@@ -20,10 +22,15 @@ if TYPE_CHECKING:
 
     from eventiq import Consumer
 
-    from .models import CloudEvent
-
 
 R = TypeVar("R", bound=Any)
+
+
+class BulkMessage(NamedTuple):
+    topic: str
+    body: bytes
+    headers: dict[str, str]
+    kwargs: dict[str, Any]
 
 
 class Broker(Generic[Message, R], LoggerMixin, ABC):
@@ -54,8 +61,6 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         *,
         name: str = "default",
         description: str | None = None,
-        encoder: Encoder = DEFAULT_ENCODER,
-        decoder: Decoder = DEFAULT_DECODER,
         default_on_exc: DefaultAction = "nack",
         default_consumer_timeout: Timeout = 300,
         tags: list[str] | None = None,
@@ -63,8 +68,6 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         validate_error_delay: int = 3600 * 12,
     ) -> None:
         self.name = name
-        self.encoder = encoder
-        self.decoder = decoder
         self.description = description or type(self).__name__
         self.default_on_exc = default_on_exc
         self.tags = tags
@@ -80,15 +83,6 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
     def format_topic(self, topic: str) -> str:
         return format_topic(topic, self.WILDCARD_ONE, self.WILDCARD_MANY)
-
-    def _encode_message(
-        self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
-    ) -> bytes:
-        encoder = encoder or self.encoder
-        message.content_type = encoder.CONTENT_TYPE
-        return encoder.encode(message)
 
     @abstractmethod
     def get_info(self) -> dict[str, Any]:
@@ -108,11 +102,31 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
     @abstractmethod
     async def publish(
         self,
-        message: CloudEvent,
-        encoder: Encoder | None = None,
+        topic: str,
+        body: bytes,
+        *,
+        headers: dict[str, str],
         **kwargs: Any,
     ) -> R:
         raise NotImplementedError
+
+    async def bulk_publish(
+        self,
+        messages: list[BulkMessage],
+        topic: str | None = None,
+    ) -> None:
+        """
+        Default implementation of bulk publish uses task groups to publish messages concurrently.
+        """
+        async with anyio.create_task_group() as tg:
+            for msg_topic, body, headers, kwargs in messages:
+                message_topic = topic or msg_topic
+                tg.start_soon(self._publish_task, message_topic, body, headers, kwargs)
+
+    async def _publish_task(
+        self, topic: str, body: bytes, headers: dict[str, str], kwargs: dict[str, Any]
+    ) -> None:
+        await self.publish(topic, body, headers=headers, **kwargs)
 
     @abstractmethod
     async def connect(self) -> None:
@@ -163,6 +177,7 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
 
 class UrlBroker(Broker[Message, R], ABC):
     settings: type[UrlBrokerSettings]
+    error_msg = "Broker not connected"
 
     def __init__(
         self,
@@ -174,6 +189,10 @@ class UrlBroker(Broker[Message, R], ABC):
         super().__init__(**kwargs)
         self.url = str(url)
         self.connection_options = connection_options or {}
+
+    @property
+    def connection_error(self) -> BrokerConnectionError:
+        return BrokerConnectionError(self.error_msg)
 
     def get_info(self) -> dict[str, Any]:
         parsed = urlparse(self.url)
