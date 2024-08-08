@@ -47,13 +47,13 @@ class Consumer(ABC, Generic[CloudEventType]):
         name: str,
         event_type: type[CloudEventType],
         topic: str | None = None,
+        concurrency: int = 1,
         timeout: Timeout | None = None,
-        dynamic: bool = False,
-        tags: list[str] | None = None,
+        description: str | None = None,
         encoder: Encoder | None = None,
         decoder: Decoder | None = None,
-        description: str | None = None,
-        concurrency: int = 1,
+        dynamic: bool = False,
+        tags: list[str] | None = None,
         publishes: list[Publishes] | None = None,
         parameters: dict[str, Parameter] | None = None,
         asyncapi_extra: dict[str, Any] | None = None,
@@ -82,7 +82,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.description = description
         self.publishes = publishes or []
         self.asyncapi_extra = asyncapi_extra or {}
-        self.options: dict[str, Any] = options
+        self.options = options
         self.logger = get_logger(__name__, self.name)
 
     def maybe_set_publisher(self, publisher: Publisher) -> None:

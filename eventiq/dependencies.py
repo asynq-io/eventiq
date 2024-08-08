@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-import inspect
+from inspect import Parameter, signature
 from typing import TYPE_CHECKING, Any, Callable
 
 from typing_extensions import Concatenate, ParamSpec
@@ -19,13 +19,17 @@ P = ParamSpec("P")
 def resolved_func(
     func: Callable[Concatenate[CloudEventType, P], Awaitable[Any]],
 ) -> Callable[Concatenate[CloudEventType, P], Awaitable[Any]]:
-    signature = inspect.signature(func)
+    sig = signature(func)
     params = {
         k: (v.annotation, v.default)
-        for k, v in signature.parameters.items()
-        if k not in {"message", "args", "kwargs", "_"}
+        for k, v in sig.parameters.items()
+        if k not in {"message", "args", "kwargs"}
         and v.kind
-        not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+        not in {
+            Parameter.POSITIONAL_ONLY,
+            Parameter.VAR_POSITIONAL,
+            Parameter.VAR_KEYWORD,
+        }
     }
 
     if not params:
@@ -41,7 +45,7 @@ def resolved_func(
             annotation, default = v
             if annotation in state:
                 kwargs[k] = state[annotation]
-            elif default is inspect.Parameter.empty:
+            elif default is Parameter.empty:
                 err = f"Missing dependency {k}: {annotation}"
                 raise DependencyError(err)
 
