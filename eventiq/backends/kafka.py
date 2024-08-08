@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from itertools import chain
 from typing import TYPE_CHECKING, Annotated, Any
-from uuid import uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, ConsumerRecord, TopicPartition
 from anyio import move_on_after
@@ -17,7 +16,7 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import Consumer
-    from eventiq.types import DecodedMessage
+    from eventiq.types import ID, DecodedMessage
 
 KafkaUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["kafka"])]
 
@@ -146,18 +145,21 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         body: bytes,
         *,
         headers: dict[str, str],
+        message_id: ID | None = None,
+        message_time: datetime | None = None,
+        timestamp_ms: int | None = None,
+        partition: int | None = None,
         **kwargs: Any,
     ) -> None:
-        timestamp_ms = kwargs.get("timestamp_ms")
-        if "time" in kwargs and timestamp_ms is None:
-            timestamp_ms = int(kwargs["time"].timestamp() * 1000)
-        partition = kwargs.get("partition")
-        key = kwargs.get("key") or str(kwargs.get("id", uuid4()))
+        if message_id:
+            message_id = str(message_id)
+        if message_time and not timestamp_ms:
+            timestamp_ms = int(message_time.timestamp() * 1000)
         await self.publisher.send(
             topic=topic,
             value=body,
-            key=key,
+            key=message_id,
             partition=partition,
-            headers=headers,
             timestamp_ms=timestamp_ms,
+            headers=headers,
         )

@@ -12,4 +12,7 @@ class MyConsumer(GenericConsumer[CloudEvent]):
     name = "example_consumer"
 
     async def process(self, message: CloudEvent):
-        pass
+        print(f"Received Message {message.id} with data: {message.data}")
+        await self.publish(
+            message.copy(update={"topic": "example.topic2", "data": "new data"})
+        )

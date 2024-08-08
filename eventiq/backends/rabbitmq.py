@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, Union
-from uuid import uuid4
 
 import aio_pika
 from aio_pika.abc import (
     AbstractExchange,
     AbstractIncomingMessage,
     AbstractRobustConnection,
+    DateType,
 )
 from aiormq.abc import ConfirmationFrameType
 from anyio import move_on_after
@@ -131,22 +131,38 @@ class RabbitmqBroker(
         body: bytes,
         *,
         headers: dict[str, str],
+        message_id: str | None = None,
+        message_content_type: str | None = None,
+        message_type: str | None = None,
+        message_time: DateType | None = None,
+        message_source: str | None = None,
+        timeout: float | None = None,
+        mandatory: bool = True,
+        immidiate: bool = False,
+        delivery_mode: aio_pika.DeliveryMode = aio_pika.DeliveryMode.PERSISTENT,
+        priority: int | None = None,
+        correlation_id: str | None = None,
+        reply_to: str | None = None,
+        expiration: DateType | None = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ) -> ConfirmationFrameType | None:
-        headers = headers or {}
-        timeout = kwargs.get("timeout")
-        mandatory = kwargs.get("mandatory", True)
-        immidiate = kwargs.get("immidiate", False)
+        message_id = str(message_id) if message_id else None
         msg = aio_pika.Message(
+            body,
             headers=dict(headers),
-            body=body,
-            app_id=kwargs.get("source"),
-            content_type=headers.get("Content-Type"),
-            timestamp=kwargs.get("time"),
-            message_id=str(kwargs.get("id", uuid4())),
-            type=kwargs.get("type"),
+            content_type=message_content_type,
             content_encoding="UTF-8",
-            delivery_mode=kwargs.get("delivery_mode", aio_pika.DeliveryMode.PERSISTENT),
+            delivery_mode=delivery_mode,
+            priority=priority,
+            correlation_id=correlation_id,
+            reply_to=reply_to,
+            expiration=expiration,
+            message_id=message_id,
+            timestamp=message_time,
+            type=message_type,
+            user_id=user_id,
+            app_id=message_source,
         )
         return await self.exchange.publish(
             msg,

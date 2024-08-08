@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC
 from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any, Callable
-from uuid import uuid4
 
 import anyio
 from nats.aio.client import Client
@@ -208,16 +207,15 @@ class JetStreamBroker(
         body: bytes,
         *,
         headers: dict[str, str],
+        message_id: str | None = None,
+        timeout: float | None = None,
+        stream: str | None = None,
         **kwargs: Any,
     ) -> api.PubAck:
-        if "Nats-Msg-Id" not in headers:
-            headers["Nats-Msg-Id"] = kwargs.get("id", str(uuid4()))
+        if "Nats-Msg-Id" not in headers and message_id:
+            headers["Nats-Msg-Id"] = message_id
         response = await self.js.publish(
-            subject=topic,
-            payload=body,
-            headers=headers,
-            timeout=kwargs.get("timeout"),
-            stream=kwargs.get("stream"),
+            topic, payload=body, timeout=timeout, stream=stream, headers=headers
         )
         if self._auto_flush:
             await self.flush()

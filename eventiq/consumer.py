@@ -3,32 +3,39 @@ from __future__ import annotations
 import inspect
 import socket
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Generic,
-    Union,
     overload,
 )
 from uuid import uuid4
 
 import anyio
-from typing_extensions import Concatenate, ParamSpec, TypedDict, Unpack
+from typing_extensions import Concatenate, Unpack
 
 from .dependencies import resolved_func
 from .logging import get_logger
-from .types import CloudEventType, Decoder, Parameter, Timeout
+from .types import CloudEventType, P
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
-P = ParamSpec("P")
-
-
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from anyio.streams.memory import MemoryObjectSendStream
 
     from .models import Publishes
+    from .types import (
+        ConsumerGroupOptions,
+        ConsumerOptions,
+        Decoder,
+        Encoder,
+        MessageHandler,
+        Parameter,
+        Publisher,
+        Timeout,
+    )
 
 
 class Consumer(ABC, Generic[CloudEventType]):
@@ -43,6 +50,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         timeout: Timeout | None = None,
         dynamic: bool = False,
         tags: list[str] | None = None,
+        encoder: Encoder | None = None,
         decoder: Decoder | None = None,
         description: str | None = None,
         concurrency: int = 1,
@@ -67,6 +75,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.timeout = timeout
         self.dynamic = dynamic
         self.tags = tags
+        self.encoder = encoder
         self.decoder = decoder
         self.concurrency = concurrency
         self.parameters = parameters or {}
@@ -75,6 +84,9 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.asyncapi_extra = asyncapi_extra or {}
         self.options: dict[str, Any] = options
         self.logger = get_logger(__name__, self.name)
+
+    def maybe_set_publisher(self, publisher: Publisher) -> None:
+        pass
 
     if TYPE_CHECKING:
         process: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
@@ -117,9 +129,19 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
             extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore[attr-defined]
         if "description" not in extra:
             extra["description"] = type(self).__doc__ or ""
-
         super().__init__(**extra)
+        self._publish: Publisher | None = None
         self.process = resolved_func(self.process)
+
+    def maybe_set_publisher(self, publisher: Publisher) -> None:
+        self._publish = publisher
+
+    @property
+    def publish(self) -> Publisher:
+        if self._publish is None:
+            err = "Publisher is not set"
+            raise RuntimeError(err)
+        return self._publish
 
 
 class ChannelConsumer(Consumer[CloudEventType]):
@@ -139,28 +161,6 @@ class ChannelConsumer(Consumer[CloudEventType]):
         await self.channel.send((message, event.set))
         with anyio.fail_after(self._timeout):
             await event.wait()
-
-
-MessageHandler = Union[
-    type[GenericConsumer], Callable[Concatenate[CloudEventType, P], Awaitable[Any]]
-]
-
-
-class ConsumerGroupOptions(TypedDict, total=False):
-    topic: str
-    timeout: Timeout
-    dynamic: bool
-    tags: list[str]
-    decoder: Decoder
-    description: str
-    concurrency: int
-    publishes: list[Publishes]
-    parameters: dict[str, Parameter]
-    asyncapi_extra: dict[str, Any]
-
-
-class ConsumerOptions(ConsumerGroupOptions, total=False):
-    name: str
 
 
 class ConsumerGroup:

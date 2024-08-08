@@ -26,8 +26,8 @@ class CloudEvent(BaseModel, Generic[D]):
     """Base Schema for all messages."""
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
-    content_type: str = Field(
-        "application/json",
+    content_type: Optional[str] = Field(
+        None,
         alias="datacontenttype",
         description="Message content type",
     )
@@ -149,8 +149,6 @@ class CloudEvent(BaseModel, Generic[D]):
 
     @property
     def headers(self) -> dict[str, str]:
-        if self._raw:
-            return getattr(self.raw, "headers", {})
         return self._headers
 
     model_config = {

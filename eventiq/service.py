@@ -15,7 +15,16 @@ from .encoder import DEFAULT_ENCODER
 from .exceptions import DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
-from .types import Decoder, Encoder, Lifespan, Message, MiddlewareType, P
+from .types import (
+    Decoder,
+    Encoder,
+    Lifespan,
+    Message,
+    MiddlewareType,
+    P,
+    PreparedMessage,
+    Publisher,
+)
 from .utils import to_float
 
 if TYPE_CHECKING:
@@ -70,6 +79,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.publishes = publishes or []
         self.async_api_extra = async_api_extra or {}
         self.state = state or {}
+        self.state[Publisher] = self.publish
         self.options = options
 
     def add_middleware(
@@ -101,6 +111,34 @@ class Service(Generic[Message, R], LoggerMixin):
             ce.headers.update(headers)
         return await self.publish(ce, encoder=encoder)
 
+    def prepare_message(
+        self,
+        message: CloudEvent,
+        topic: str | None = None,
+        encoder: Encoder | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> PreparedMessage:
+        message_topic = topic or message.topic
+        encoder = encoder or self.encoder
+        if message.source is None:
+            message.source = self.name
+        message.content_type = encoder.CONTENT_TYPE
+        message.headers["Content-Type"] = encoder.CONTENT_TYPE
+        if topic:
+            message.headers["Destination"] = topic
+        if headers:
+            message.headers.update(headers)
+        body = encoder.encode(message)
+        message_kwargs = {
+            f"message_{k}": v
+            for k, v in message.model_dump(
+                exclude_none=True, by_alias=False, exclude={"topic", "data"}
+            ).items()
+        }
+        message_kwargs.update(kwargs)
+        return message_topic, body, message_kwargs
+
     async def publish(
         self,
         message: CloudEvent,
@@ -109,23 +147,15 @@ class Service(Generic[Message, R], LoggerMixin):
         encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> R:
-        headers = headers or {}
-        headers.update(message.headers)
-        if not message.source:
-            message.source = self.name
-        encoder = encoder or self.encoder
-        message.content_type = encoder.CONTENT_TYPE
-        headers["Content-Type"] = encoder.CONTENT_TYPE
-        topic = topic or message.topic
-        body = encoder.encode(message)
-        message_kwargs = message.model_dump()
-        message_kwargs.update(kwargs)
-
-        await self.dispatch_before(
-            "publish", message=message, headers=headers, **kwargs
+        message_topic, body, message_kwargs = self.prepare_message(
+            message, topic, encoder, headers=headers, **kwargs
         )
-        res = await self.broker.publish(topic, body, headers=headers, **message_kwargs)
-        await self.dispatch_after("publish", message=message, headers=headers, **kwargs)
+        topic = topic or message.topic
+        await self.dispatch_before("publish", message=message, **kwargs)
+        res = await self.broker.publish(
+            message_topic, body, headers=message.headers, **message_kwargs
+        )
+        await self.dispatch_after("publish", message=message, **kwargs)
         return res
 
     async def bulk_publish(
@@ -137,30 +167,19 @@ class Service(Generic[Message, R], LoggerMixin):
         encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> None:
-        encoder = encoder or self.encoder
-        headers = headers or {}
-        headers["Content-Type"] = encoder.CONTENT_TYPE
         bulk_messages: list[BulkMessage] = []
         for message in messages:
-            message.content_type = encoder.CONTENT_TYPE
-            if not message.source:
-                message.source = self.name
-            await self.dispatch_before(
-                "publish", message=message, headers=headers, **kwargs
+            message_topic, body, message_kwargs = self.prepare_message(
+                message, topic, encoder, headers=headers, **kwargs
             )
-            body = encoder.encode(message)
-            message_headers = {**headers, **message.headers}
-            message_kwargs = message.model_dump()
-            message_kwargs.update(kwargs)
-            msg = BulkMessage(message.topic, body, message_headers, message_kwargs)
+            await self.dispatch_before("publish", message=message, **kwargs)
+            msg = BulkMessage(message_topic, body, message.headers, message_kwargs)
             bulk_messages.append(msg)
 
         await self.broker.bulk_publish(bulk_messages, topic=topic)
 
-        for message, bulk_msg in zip(messages, bulk_messages):
-            await self.dispatch_after(
-                "publish", message=message, headers=bulk_msg.headers, **bulk_msg.kwargs
-            )
+        for message in messages:
+            await self.dispatch_after("publish", message=message, **kwargs)
 
     async def connect(self) -> None:
         await self.dispatch_before("broker_connect")
@@ -174,6 +193,7 @@ class Service(Generic[Message, R], LoggerMixin):
 
     async def start_consumers(self, tg: TaskGroup) -> None:
         for consumer in self.consumers.values():
+            consumer.maybe_set_publisher(self.publish)
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
                 consumer.concurrency * 2,

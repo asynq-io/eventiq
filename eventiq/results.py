@@ -50,7 +50,7 @@ class ResultBackendMiddleware(Middleware):
     ) -> None:
         if not all([result, exc is None, consumer.options.get("store_results")]):
             return
-        encoder = consumer.options.get("encoder", self.service.encoder)
+        encoder = consumer.encoder or self.service.encoder
         data = encoder.encode(AnyModel(result))
         await self.result_backend.store_result(
             f"{self.service.name}:{message.id}",
