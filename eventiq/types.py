@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from .models import CloudEvent, Publishes
     from .service import Service
 
+
+Undefinded: Any = object()
+
 ID = Union[UUID, str]
 
 Message = TypeVar("Message", bound=Any)

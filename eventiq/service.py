@@ -81,6 +81,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.state = state or {}
         self.state[Publisher] = self.publish
         self.options = options
+        self.default_action = getattr(self, self.broker.default_on_exc)
 
     def add_middleware(
         self, middleware: MiddlewareType[P], *args: P.args, **kwargs: P.kwargs
@@ -364,8 +365,9 @@ class Service(Generic[Message, R], LoggerMixin):
         except Exception as e:
             exc = e
         except anyio.get_cancelled_exc_class():
-            with anyio.fail_after(1):
-                await self.nack(consumer, raw_message)
+            with anyio.move_on_after(1, shield=True):
+                # directly call nack skipping all middlewares
+                await self.broker.nack(raw_message)
             raise
         await self._handle_message_finalization(consumer, message, result, exc)
 
@@ -422,7 +424,7 @@ class Service(Generic[Message, R], LoggerMixin):
             await self.ack(consumer, message.raw)
             return
 
-        await getattr(self, self.broker.default_on_exc)(consumer, message.raw)
+        await self.default_action(consumer, message.raw)
 
     @asynccontextmanager
     async def subscription(

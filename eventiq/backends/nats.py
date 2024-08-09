@@ -204,12 +204,12 @@ class JetStreamBroker(
         body: bytes,
         *,
         headers: dict[str, str],
-        message_id: ID | None = None,
+        message_id: ID,
         timeout: float | None = None,
         stream: str | None = None,
         **kwargs: Any,
     ) -> api.PubAck:
-        if "Nats-Msg-Id" not in headers and message_id:
+        if "Nats-Msg-Id" not in headers:
             headers["Nats-Msg-Id"] = str(message_id)
         response = await self.js.publish(
             topic, payload=body, timeout=timeout, stream=stream, headers=headers

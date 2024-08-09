@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .models import Publishes
     from .types import (
         ConsumerGroupOptions,
-        ConsumerOptions,
+        # ConsumerOptions,
         Decoder,
         Encoder,
         MessageHandler,
@@ -53,6 +53,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         encoder: Encoder | None = None,
         decoder: Decoder | None = None,
         dynamic: bool = False,
+        store_results: bool = False,
         tags: list[str] | None = None,
         publishes: list[Publishes] | None = None,
         parameters: dict[str, Parameter] | None = None,
@@ -73,11 +74,12 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.event_type = event_type
         self.topic = topic
         self.timeout = timeout
-        self.dynamic = dynamic
         self.tags = tags
         self.encoder = encoder
         self.decoder = decoder
+        self.dynamic = dynamic
         self.concurrency = concurrency
+        self.store_results = store_results
         self.parameters = parameters or {}
         self.description = description
         self.publishes = publishes or []
@@ -165,8 +167,8 @@ class ChannelConsumer(Consumer[CloudEventType]):
 
 class ConsumerGroup:
     def __init__(self, **options: Unpack[ConsumerGroupOptions]) -> None:
-        self.consumers: dict[str, Consumer] = {}
         self.options = options
+        self.consumers: dict[str, Consumer] = {}
 
     def add_consumer(self, consumer: Consumer) -> None:
         self.consumers[consumer.name] = consumer
@@ -181,19 +183,38 @@ class ConsumerGroup:
     def subscribe(
         self,
         func_or_cls: None = None,
-        **options: Unpack[ConsumerOptions],
-    ) -> Callable[[MessageHandler], MessageHandler]: ...
-
-    @overload
-    def subscribe(
-        self,
-        func_or_cls: None = None,
+        name: str | None = None,
+        event_type: type[CloudEventType] | None = None,
+        topic: str | None = None,
+        concurrency: int | None = None,
+        timeout: Timeout | None = None,
+        description: str | None = None,
+        encoder: Encoder | None = None,
+        decoder: Decoder | None = None,
+        dynamic: bool | None = None,
+        tags: list[str] | None = None,
+        publishes: list[Publishes] | None = None,
+        parameters: dict[str, Parameter] | None = None,
+        asyncapi_extra: dict[str, Any] | None = None,
         **options: Any,
     ) -> Callable[[MessageHandler], MessageHandler]: ...
 
     def subscribe(
         self,
         func_or_cls: MessageHandler | None = None,
+        name: str | None = None,
+        event_type: type[CloudEventType] | None = None,
+        topic: str | None = None,
+        concurrency: int | None = None,
+        timeout: Timeout | None = None,
+        description: str | None = None,
+        encoder: Encoder | None = None,
+        decoder: Decoder | None = None,
+        dynamic: bool | None = None,
+        tags: list[str] | None = None,
+        publishes: list[Publishes] | None = None,
+        parameters: dict[str, Parameter] | None = None,
+        asyncapi_extra: dict[str, Any] | None = None,
         **options: Any,
     ) -> MessageHandler | Callable[[MessageHandler], MessageHandler]:
         def decorator(func_or_cls: MessageHandler) -> MessageHandler:
@@ -211,10 +232,26 @@ class ConsumerGroup:
                 raise TypeError(
                     msg,
                 )
+            options.update(
+                {
+                    "name": name,
+                    "event_type": event_type,
+                    "topic": topic,
+                    "concurrency": concurrency,
+                    "timeout": timeout,
+                    "description": description,
+                    "encoder": encoder,
+                    "dynamic": dynamic,
+                    "tags": tags,
+                    "publishes": publishes,
+                    "parameters": parameters,
+                    "asyncapi_extra": asyncapi_extra,
+                }
+            )
+            filtered_options = {k: v for k, v in options.items() if v is not None}
             for k, v in self.options.items():
-                options.setdefault(k, v)
-            consumer = cls(**options)
-
+                filtered_options.setdefault(k, v)
+            consumer = cls(**filtered_options)
             self.add_consumer(consumer)
             return func_or_cls
 

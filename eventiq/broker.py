@@ -8,15 +8,17 @@ from urllib.parse import urlparse
 
 import anyio
 
-from eventiq.exceptions import BrokerConnectionError
+from eventiq.exceptions import BrokerConnectionError, BrokerError
 
 from .imports import import_from_string
 from .logging import LoggerMixin
 from .settings import BrokerSettings, UrlBrokerSettings
-from .types import DecodedMessage, DefaultAction, Message, Timeout
+from .types import ID, DecodedMessage, DefaultAction, Message, Timeout
 from .utils import format_topic, to_float
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from anyio.streams.memory import MemoryObjectSendStream
     from pydantic import AnyUrl
 
@@ -106,6 +108,11 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         body: bytes,
         *,
         headers: dict[str, str],
+        message_id: ID,
+        message_type: str,
+        message_content_type: str,
+        message_time: datetime,
+        message_source: str,
         **kwargs: Any,
     ) -> R:
         raise NotImplementedError
@@ -157,12 +164,14 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         return getattr(raw_message, "num_delivered", None)
 
     @classmethod
-    def from_settings(cls, settings: BrokerSettings, **kwargs: Any) -> Broker:
-        return cls(**settings.model_dump(), **kwargs)
-
-    @classmethod
-    def _from_env(cls, **kwargs: Any) -> Broker:
-        return cls.from_settings(cls.Settings(**kwargs))
+    def from_settings(
+        cls, settings: BrokerSettings | None = None, **kwargs: Any
+    ) -> Broker:
+        if settings is None:
+            settings = cls.Settings()
+        kw = settings.model_dump(exclude_none=True)
+        kw.update(kwargs)
+        return cls(**kw)
 
     @classmethod
     def from_env(
@@ -170,9 +179,13 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
         **kwargs: Any,
     ) -> Broker:
         if cls == Broker:
-            type_name = os.getenv("BROKER_CLASS", "eventiq.backends.stub:StubBroker")
+            try:
+                type_name = os.environ["BROKER_CLASS"]
+            except KeyError:
+                msg = "BROKER_CLASS evironment variable not set"
+                raise BrokerError(msg) from None
             cls = import_from_string(type_name)
-        return cls._from_env(**kwargs)
+        return cls.from_settings(**kwargs)
 
 
 class UrlBroker(Broker[Message, R], ABC):

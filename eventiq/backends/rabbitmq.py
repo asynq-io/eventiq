@@ -17,10 +17,12 @@ from eventiq.broker import UrlBroker
 from eventiq.settings import UrlBrokerSettings
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import Consumer
-    from eventiq.types import DecodedMessage
+    from eventiq.types import ID, DecodedMessage
 
 
 RabbitmqUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["amqp"])]
@@ -131,11 +133,11 @@ class RabbitmqBroker(
         body: bytes,
         *,
         headers: dict[str, str],
-        message_id: str | None = None,
-        message_content_type: str | None = None,
-        message_type: str | None = None,
-        message_time: DateType | None = None,
-        message_source: str | None = None,
+        message_id: ID,
+        message_type: str,
+        message_content_type: str,
+        message_time: datetime,
+        message_source: str,
         timeout: float | None = None,
         mandatory: bool = True,
         immidiate: bool = False,
@@ -147,7 +149,6 @@ class RabbitmqBroker(
         user_id: str | None = None,
         **kwargs: Any,
     ) -> ConfirmationFrameType | None:
-        message_id = str(message_id) if message_id else None
         msg = aio_pika.Message(
             body,
             headers=dict(headers),
@@ -158,7 +159,7 @@ class RabbitmqBroker(
             correlation_id=correlation_id,
             reply_to=reply_to,
             expiration=expiration,
-            message_id=message_id,
+            message_id=str(message_id),
             timestamp=message_time,
             type=message_type,
             user_id=user_id,
