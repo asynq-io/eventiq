@@ -110,7 +110,3 @@ class ConsumerGroupOptions(TypedDict, total=False):
     publishes: list[Publishes]
     parameters: dict[str, Parameter]
     asyncapi_extra: dict[str, Any]
-
-
-class ConsumerOptions(ConsumerGroupOptions, total=False):
-    name: str

@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from .models import Publishes
     from .types import (
         ConsumerGroupOptions,
-        # ConsumerOptions,
         Decoder,
         Encoder,
         MessageHandler,
