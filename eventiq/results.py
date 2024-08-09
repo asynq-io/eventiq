@@ -48,7 +48,7 @@ class ResultBackendMiddleware(Middleware):
         result: Any | None = None,
         exc: Exception | None = None,
     ) -> None:
-        if not all([result, exc is None, consumer.options.get("store_results")]):
+        if not all([result, exc is None, consumer.store_results]):
             return
         encoder = consumer.encoder or self.service.encoder
         data = encoder.encode(AnyModel(result))

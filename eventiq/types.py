@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from .models import CloudEvent, Publishes
     from .service import Service
 
+
+Undefinded: Any = object()
+
 ID = Union[UUID, str]
 
 Message = TypeVar("Message", bound=Any)
@@ -95,6 +98,15 @@ class Parameter(TypedDict, total=False):
     location: str
 
 
+class RetryStrategy(Protocol):
+    def maybe_retry(
+        self,
+        service: Service,
+        message: CloudEvent,
+        exc: Exception,
+    ) -> None: ...
+
+
 class ConsumerGroupOptions(TypedDict, total=False):
     topic: str
     timeout: Timeout
@@ -104,10 +116,7 @@ class ConsumerGroupOptions(TypedDict, total=False):
     decoder: Decoder
     description: str
     concurrency: int
+    retry_strategy: RetryStrategy
     publishes: list[Publishes]
     parameters: dict[str, Parameter]
     asyncapi_extra: dict[str, Any]
-
-
-class ConsumerOptions(ConsumerGroupOptions, total=False):
-    name: str

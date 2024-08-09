@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import functools
 import signal
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
 
 import anyio
-from anyio import CancelScope, create_memory_object_stream
+from anyio import CancelScope, create_memory_object_stream, from_thread
 from pydantic import ValidationError
 
 from .broker import Broker, BulkMessage, R
@@ -81,6 +82,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.state = state or {}
         self.state[Publisher] = self.publish
         self.options = options
+        self.default_action = getattr(self, self.broker.default_on_exc)
 
     def add_middleware(
         self, middleware: MiddlewareType[P], *args: P.args, **kwargs: P.kwargs
@@ -139,6 +141,24 @@ class Service(Generic[Message, R], LoggerMixin):
         message_kwargs.update(kwargs)
         return message_topic, body, message_kwargs
 
+    def publish_sync(
+        self,
+        message: CloudEvent,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> R:
+        fn = functools.partial(
+            self.publish,
+            message,
+            topic=topic,
+            headers=headers,
+            encoder=encoder,
+            **kwargs,
+        )
+        return from_thread.run(fn)
+
     async def publish(
         self,
         message: CloudEvent,
@@ -157,6 +177,24 @@ class Service(Generic[Message, R], LoggerMixin):
         )
         await self.dispatch_after("publish", message=message, **kwargs)
         return res
+
+    def bulk_publish_sync(
+        self,
+        messages: Sequence[CloudEvent],
+        *,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> None:
+        fn = functools.partial(
+            self.bulk_publish,
+            topic=topic,
+            headers=headers,
+            encoder=encoder,
+            **kwargs,
+        )
+        from_thread.run(fn)
 
     async def bulk_publish(
         self,
@@ -364,8 +402,9 @@ class Service(Generic[Message, R], LoggerMixin):
         except Exception as e:
             exc = e
         except anyio.get_cancelled_exc_class():
-            with anyio.fail_after(1):
-                await self.nack(consumer, raw_message)
+            with anyio.move_on_after(1, shield=True):
+                # directly call nack skipping all middlewares
+                await self.broker.nack(raw_message)
             raise
         await self._handle_message_finalization(consumer, message, result, exc)
 
@@ -397,7 +436,6 @@ class Service(Generic[Message, R], LoggerMixin):
                 consumer=consumer,
                 message=message,
                 exc=exc,
-                delay=exc.delay,
             )
             await self.nack(consumer, message.raw, delay=exc.delay)
             return
@@ -422,7 +460,7 @@ class Service(Generic[Message, R], LoggerMixin):
             await self.ack(consumer, message.raw)
             return
 
-        await getattr(self, self.broker.default_on_exc)(consumer, message.raw)
+        await self.default_action(consumer, message.raw)
 
     @asynccontextmanager
     async def subscription(

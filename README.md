@@ -93,9 +93,8 @@ broker = JetStreamBroker(url="nats://localhost:4222")
 service = Service(
     name="example-service",
     broker=broker,
-    middlewares=[SendMessageMiddleware()]
 )
-
+service.add_middleware(SendMessageMiddleware)
 
 @service.subscribe(topic="test.topic")
 async def example_run(message: CloudEvent):

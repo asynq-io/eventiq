@@ -4,13 +4,14 @@ from pydantic.networks import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .imports import ImportedType
-from .types import Decoder, Encoder
+from .types import Decoder, DefaultAction, Encoder
 
 
 class BrokerSettings(BaseSettings):
     name: str = "default"
-    default_consumer_timeout: int = 300
     description: Optional[str] = None
+    default_on_exc: DefaultAction = "nack"
+    default_consumer_timeout: int = 300
     validate_error_delay: Optional[int] = 3600 * 12
 
     model_config = SettingsConfigDict(env_prefix="BROKER_")

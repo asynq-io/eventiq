@@ -148,20 +148,18 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         body: bytes,
         *,
         headers: dict[str, str],
-        message_id: ID | None = None,
-        message_time: datetime | None = None,
+        message_id: ID,
+        message_time: datetime,
         timestamp_ms: int | None = None,
         partition: int | None = None,
         **kwargs: Any,
     ) -> None:
-        if message_id:
-            message_id = str(message_id)
-        if message_time and not timestamp_ms:
+        if timestamp_ms is None:
             timestamp_ms = int(message_time.timestamp() * 1000)
         await self.publisher.send(
             topic=topic,
             value=body,
-            key=message_id,
+            key=str(message_id),
             partition=partition,
             timestamp_ms=timestamp_ms,
             headers=headers,
