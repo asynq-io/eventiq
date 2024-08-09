@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import functools
 import signal
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
 
 import anyio
-from anyio import CancelScope, create_memory_object_stream
+from anyio import CancelScope, create_memory_object_stream, from_thread
 from pydantic import ValidationError
 
 from .broker import Broker, BulkMessage, R
@@ -140,6 +141,24 @@ class Service(Generic[Message, R], LoggerMixin):
         message_kwargs.update(kwargs)
         return message_topic, body, message_kwargs
 
+    def publish_sync(
+        self,
+        message: CloudEvent,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> R:
+        fn = functools.partial(
+            self.publish,
+            message,
+            topic=topic,
+            headers=headers,
+            encoder=encoder,
+            **kwargs,
+        )
+        return from_thread.run(fn)
+
     async def publish(
         self,
         message: CloudEvent,
@@ -158,6 +177,24 @@ class Service(Generic[Message, R], LoggerMixin):
         )
         await self.dispatch_after("publish", message=message, **kwargs)
         return res
+
+    def bulk_publish_sync(
+        self,
+        messages: Sequence[CloudEvent],
+        *,
+        topic: str | None = None,
+        headers: dict[str, str] | None = None,
+        encoder: Encoder | None = None,
+        **kwargs: Any,
+    ) -> None:
+        fn = functools.partial(
+            self.bulk_publish,
+            topic=topic,
+            headers=headers,
+            encoder=encoder,
+            **kwargs,
+        )
+        from_thread.run(fn)
 
     async def bulk_publish(
         self,
