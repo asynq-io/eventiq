@@ -35,7 +35,7 @@ classifiers = [
 ]
 dependencies = [
     "anyio>4.0,<5.0",
-    "typer",
+    "typer<1.0",
     "pydantic >2.0,<3",
     "pydantic-settings>2.0,<3",
     "pydantic-asyncapi==0.2.1",

@@ -436,7 +436,6 @@ class Service(Generic[Message, R], LoggerMixin):
                 consumer=consumer,
                 message=message,
                 exc=exc,
-                delay=exc.delay,
             )
             await self.nack(consumer, message.raw, delay=exc.delay)
             return

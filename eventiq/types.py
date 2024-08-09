@@ -7,6 +7,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Generic,
     Literal,
     Optional,
     Protocol,
@@ -98,6 +99,15 @@ class Parameter(TypedDict, total=False):
     location: str
 
 
+class RetryStrategy(Generic[CloudEventType]):
+    def maybe_retry(
+        self,
+        service: Service,
+        message: CloudEventType,
+        exc: Exception,
+    ) -> None: ...
+
+
 class ConsumerGroupOptions(TypedDict, total=False):
     topic: str
     timeout: Timeout
@@ -107,6 +117,7 @@ class ConsumerGroupOptions(TypedDict, total=False):
     decoder: Decoder
     description: str
     concurrency: int
+    retry_strategy: RetryStrategy
     publishes: list[Publishes]
     parameters: dict[str, Parameter]
     asyncapi_extra: dict[str, Any]

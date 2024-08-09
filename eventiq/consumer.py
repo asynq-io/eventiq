@@ -17,7 +17,7 @@ from typing_extensions import Concatenate, Unpack
 
 from .dependencies import resolved_func
 from .logging import get_logger
-from .types import CloudEventType, P
+from .types import CloudEventType, P, RetryStrategy
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
@@ -51,6 +51,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         description: str | None = None,
         encoder: Encoder | None = None,
         decoder: Decoder | None = None,
+        retry_strategy: RetryStrategy | None = None,
         dynamic: bool = False,
         store_results: bool = False,
         tags: list[str] | None = None,
@@ -78,6 +79,7 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.decoder = decoder
         self.dynamic = dynamic
         self.concurrency = concurrency
+        self.retry_strategy = retry_strategy
         self.store_results = store_results
         self.parameters = parameters or {}
         self.description = description

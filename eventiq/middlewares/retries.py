@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Callable, Generic, NamedTuple
@@ -10,6 +9,7 @@ from typing_extensions import ParamSpec
 from eventiq.exceptions import Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
 from eventiq.middleware import CloudEventType, Middleware
+from eventiq.types import RetryStrategy
 
 if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer, Service
@@ -39,20 +39,8 @@ def constant(interval: int = 30) -> DelayGenerator:
     return _constant
 
 
-class AbstractRetryStrategy(ABC, Generic[CloudEventType]):
-    @abstractmethod
-    def maybe_retry(
-        self,
-        *,
-        service: Service,
-        message: CloudEventType,
-        exc: Exception,
-    ) -> None:
-        raise NotImplementedError
-
-
-class RetryStrategy(
-    AbstractRetryStrategy[CloudEventType], Generic[P, CloudEventType], LoggerMixin
+class BaseRetryStrategy(
+    RetryStrategy[CloudEventType], Generic[P, CloudEventType], LoggerMixin
 ):
     def __init__(
         self,
@@ -96,7 +84,6 @@ class RetryStrategy(
 
     def maybe_retry(
         self,
-        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -107,10 +94,10 @@ class RetryStrategy(
             self.fail(message, exc)
 
 
-class MaxAge(RetryStrategy[P, CloudEventType]):
+class MaxAge(BaseRetryStrategy[P, CloudEventType]):
     def __init__(
         self,
-        max_age: timedelta | dict[str, Any] = timedelta(seconds=60),
+        max_age: timedelta | dict[str, Any] = timedelta(hours=6),
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
@@ -120,7 +107,6 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
 
     def maybe_retry(
         self,
-        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -131,14 +117,13 @@ class MaxAge(RetryStrategy[P, CloudEventType]):
             self.fail(message, exc)
 
 
-class MaxRetries(RetryStrategy[P, CloudEventType]):
+class MaxRetries(BaseRetryStrategy[P, CloudEventType]):
     def __init__(self, max_retries: int = 3, **extra: Any) -> None:
         super().__init__(**extra)
         self.max_retries = max_retries
 
     def maybe_retry(
         self,
-        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -155,7 +140,7 @@ class MaxRetries(RetryStrategy[P, CloudEventType]):
             self.fail(message, exc)
 
 
-class RetryWhen(RetryStrategy[P, CloudEventType]):
+class RetryWhen(BaseRetryStrategy[P, CloudEventType]):
     def __init__(
         self,
         retry_when: Callable[[CloudEventType, Exception], bool],
@@ -166,7 +151,6 @@ class RetryWhen(RetryStrategy[P, CloudEventType]):
 
     def maybe_retry(
         self,
-        *,
         service: Service,
         message: CloudEventType,
         exc: Exception,
@@ -188,10 +172,10 @@ class RetryMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
         service: Service,
-        default_retry_strategy: RetryStrategy = MaxAge(max_age=timedelta(hours=6)),
+        retry_strategy: RetryStrategy = MaxAge(),
     ) -> None:
         super().__init__(service)
-        self.default_retry_strategy = default_retry_strategy
+        self.retry_strategy = retry_strategy
 
     async def after_process_message(
         self,
@@ -204,8 +188,5 @@ class RetryMiddleware(Middleware[CloudEventType]):
         if exc is None or isinstance(exc, (Retry, Fail, Skip)):
             return
 
-        retry_strategy = consumer.options.get(
-            "retry_strategy",
-            self.default_retry_strategy,
-        )
+        retry_strategy = consumer.retry_strategy or self.retry_strategy
         retry_strategy.maybe_retry(service=self.service, message=message, exc=exc)
