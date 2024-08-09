@@ -7,7 +7,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Generic,
     Literal,
     Optional,
     Protocol,
@@ -99,11 +98,11 @@ class Parameter(TypedDict, total=False):
     location: str
 
 
-class RetryStrategy(Generic[CloudEventType]):
+class RetryStrategy(Protocol):
     def maybe_retry(
         self,
         service: Service,
-        message: CloudEventType,
+        message: CloudEvent,
         exc: Exception,
     ) -> None: ...
 

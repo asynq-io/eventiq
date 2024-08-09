@@ -9,10 +9,10 @@ from typing_extensions import ParamSpec
 from eventiq.exceptions import Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
 from eventiq.middleware import CloudEventType, Middleware
-from eventiq.types import RetryStrategy
 
 if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer, Service
+    from eventiq.types import RetryStrategy
 
 
 P = ParamSpec("P")
@@ -39,9 +39,7 @@ def constant(interval: int = 30) -> DelayGenerator:
     return _constant
 
 
-class BaseRetryStrategy(
-    RetryStrategy[CloudEventType], Generic[P, CloudEventType], LoggerMixin
-):
+class BaseRetryStrategy(Generic[P, CloudEventType], LoggerMixin):
     def __init__(
         self,
         throws: tuple[type[Exception], ...] = (),
