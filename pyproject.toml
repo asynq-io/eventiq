@@ -134,6 +134,7 @@ ignore = [
     "A002",
     "ARG002",
     "ARG004",
+    "ASYNC109",
     "ANN401",
     "B008",    # do not perform function calls in argument defaults
     "BLE001",
