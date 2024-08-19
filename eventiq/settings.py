@@ -1,4 +1,4 @@
-from typing import Any, Generic, Literal, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar, Union
 
 from pydantic.networks import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,7 +17,7 @@ class BrokerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BROKER_")
 
 
-Url = TypeVar("Url", bound=AnyUrl)
+Url = TypeVar("Url", bound=Union[AnyUrl, str])
 
 
 class UrlBrokerSettings(BrokerSettings, Generic[Url]):

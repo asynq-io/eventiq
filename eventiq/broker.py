@@ -184,8 +184,10 @@ class Broker(Generic[Message, R], LoggerMixin, ABC):
             except KeyError:
                 msg = "BROKER_CLASS evironment variable not set"
                 raise BrokerError(msg) from None
-            cls = import_from_string(type_name)
-        return cls.from_settings(**kwargs)
+            broker_cls = import_from_string(type_name)
+        else:
+            broker_cls = cls
+        return broker_cls.from_settings(**kwargs)
 
 
 class UrlBroker(Broker[Message, R], ABC):
