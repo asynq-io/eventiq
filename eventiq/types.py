@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from typing import (
@@ -51,7 +50,7 @@ Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
 P = ParamSpec("P")
 
 MessageHandler = Union[
-    type["GenericConsumer"], Callable[Concatenate[CloudEventType, P], Awaitable[Any]]
+    type["GenericConsumer"], Callable[Concatenate[CloudEventType, P], Any]
 ]
 
 

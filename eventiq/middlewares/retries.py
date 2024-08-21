@@ -42,21 +42,16 @@ def constant(interval: int = 30) -> DelayGenerator:
 class BaseRetryStrategy(Generic[P, CloudEventType], LoggerMixin):
     def __init__(
         self,
+        *,
         throws: tuple[type[Exception], ...] = (),
-        delay_generator: Callable[P, DelayGenerator] | None = None,
-        min_delay: int = 2,
+        delay_generator: DelayGenerator = expo(),
+        min_delay: int = 1,
         log_exceptions: bool = True,
-        *args: P.args,
-        **kwargs: P.kwargs,
     ) -> None:
-        if Fail not in throws:
-            throws = (*throws, Fail)
         self.throws = throws
         self.min_delay = min_delay
         self.log_exceptions = log_exceptions
-        self.delay_generator = (
-            delay_generator(*args, **kwargs) if delay_generator else expo()
-        )
+        self.delay_generator = delay_generator
 
     def retry(self, message: CloudEventType, exc: Exception) -> None:
         delay = getattr(exc, "delay", None)
@@ -95,13 +90,14 @@ class BaseRetryStrategy(Generic[P, CloudEventType], LoggerMixin):
 class MaxAge(BaseRetryStrategy[P, CloudEventType]):
     def __init__(
         self,
+        *,
         max_age: timedelta | dict[str, Any] = timedelta(hours=6),
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
         if isinstance(max_age, Mapping):
             max_age = timedelta(**max_age)
-        self.max_age: timedelta = max_age
+        self.max_age = max_age
 
     def maybe_retry(
         self,
@@ -116,7 +112,7 @@ class MaxAge(BaseRetryStrategy[P, CloudEventType]):
 
 
 class MaxRetries(BaseRetryStrategy[P, CloudEventType]):
-    def __init__(self, max_retries: int = 3, **extra: Any) -> None:
+    def __init__(self, *, max_retries: int = 3, **extra: Any) -> None:
         super().__init__(**extra)
         self.max_retries = max_retries
 
@@ -141,6 +137,7 @@ class MaxRetries(BaseRetryStrategy[P, CloudEventType]):
 class RetryWhen(BaseRetryStrategy[P, CloudEventType]):
     def __init__(
         self,
+        *,
         retry_when: Callable[[CloudEventType, Exception], bool],
         **extra: Any,
     ) -> None:

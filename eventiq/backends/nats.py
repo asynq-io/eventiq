@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC
-from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any, Callable
 
 import anyio
@@ -16,7 +15,7 @@ from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.results import ResultBackend
 from eventiq.settings import UrlBrokerSettings
-from eventiq.utils import to_float, utc_now
+from eventiq.utils import to_float
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -144,9 +143,9 @@ class NatsBroker(AbstractNatsBroker[None]):
         body: bytes,
         *,
         headers: dict[str, str],
+        reply: str = "",
         **kwargs: Any,
     ) -> None:
-        reply = kwargs.get("reply", "")
         await self.client.publish(topic, body, headers=headers, reply=reply)
         if self._auto_flush or kwargs.get("flush"):
             await self.flush()
@@ -260,8 +259,7 @@ class JetStreamBroker(
             self.logger.info("Sender finished for %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
-        date = raw_message.metadata.timestamp.replace(tzinfo=timezone.utc)
-        return date < (utc_now() - timedelta(seconds=self.validate_error_delay))
+        return raw_message.metadata.num_delivered <= 3
 
     def get_num_delivered(self, raw_message: NatsMsg) -> int | None:
         return raw_message.metadata.num_delivered
