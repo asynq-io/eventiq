@@ -234,7 +234,6 @@ class JetStreamBroker(
             if key in consumer.options:
                 config_kwargs[key] = consumer.options[key]
         config = ConsumerConfig(**config_kwargs)
-        prefetch_count = consumer.options.get("prefetch_count")
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", 0.1)
         subscription = await self.js.pull_subscribe(
@@ -246,15 +245,12 @@ class JetStreamBroker(
             async with send_stream:
                 while True:
                     try:
-                        if prefetch_count:
-                            batch = prefetch_count
-                        else:
-                            batch = consumer.concurrency - len(
-                                send_stream._state.buffer  # noqa: SLF001
-                            )
-                            if batch == 0:
-                                await asyncio.sleep(0.1)
-                                continue
+                        batch = consumer.concurrency - len(
+                            send_stream._state.buffer  # noqa: SLF001
+                        )
+                        if batch == 0:
+                            await asyncio.sleep(0.1)
+                            continue
                         self.logger.debug("Fetching %d messages", batch)
                         messages = await subscription.fetch(
                             batch=batch,
