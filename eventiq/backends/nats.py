@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC
 from typing import TYPE_CHECKING, Annotated, Any, Callable
 
@@ -98,6 +99,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
     async def disconnect(self) -> None:
         if self.client.is_connected:
+            await self.client.drain()
             await self.client.close()
 
     async def flush(self) -> None:
@@ -232,7 +234,7 @@ class JetStreamBroker(
             if key in consumer.options:
                 config_kwargs[key] = consumer.options[key]
         config = ConsumerConfig(**config_kwargs)
-        batch = consumer.options.get("batch", consumer.concurrency * 2)
+        prefetch_count = consumer.options.get("prefetch_count")
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", 0.1)
         subscription = await self.js.pull_subscribe(
@@ -244,6 +246,16 @@ class JetStreamBroker(
             async with send_stream:
                 while True:
                     try:
+                        if prefetch_count:
+                            batch = prefetch_count
+                        else:
+                            batch = consumer.concurrency - len(
+                                send_stream._state.buffer  # noqa: SLF001
+                            )
+                            if batch == 0:
+                                await asyncio.sleep(0.1)
+                                continue
+                        self.logger.debug("Fetching %d messages", batch)
                         messages = await subscription.fetch(
                             batch=batch,
                             timeout=fetch_timeout,
@@ -251,12 +263,12 @@ class JetStreamBroker(
                         )
                         for message in messages:
                             await send_stream.send(message)
-                    except FetchTimeoutError:  # noqa: PERF203
+                    except FetchTimeoutError:
                         pass
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
-            self.logger.info("Sender finished for %s", consumer.name)
+            self.logger.info("Stopped sender for consumer: %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         return raw_message.metadata.num_delivered <= 3
