@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC
-from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Annotated, Any, Callable
 
 import anyio
@@ -16,7 +16,7 @@ from eventiq.broker import R, UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.results import ResultBackend
 from eventiq.settings import UrlBrokerSettings
-from eventiq.utils import to_float, utc_now
+from eventiq.utils import to_float
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     """:param auto_flush: auto flush messages on publish
+    :param auto_flush: auto flush on publish
     :param kwargs: options for base class
     """
 
@@ -99,6 +100,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
     async def disconnect(self) -> None:
         if self.client.is_connected:
+            await self.client.drain()
             await self.client.close()
 
     async def flush(self) -> None:
@@ -144,11 +146,12 @@ class NatsBroker(AbstractNatsBroker[None]):
         body: bytes,
         *,
         headers: dict[str, str],
+        reply: str = "",
+        flush: bool = False,
         **kwargs: Any,
     ) -> None:
-        reply = kwargs.get("reply", "")
         await self.client.publish(topic, body, headers=headers, reply=reply)
-        if self._auto_flush or kwargs.get("flush"):
+        if self._auto_flush or flush:
             await self.flush()
 
 
@@ -157,9 +160,8 @@ class JetStreamBroker(
     ResultBackend[NatsMsg, api.PubAck],
 ):
     """NatsBroker with JetStream enabled
-    :param prefetch_count: default number of messages to prefetch
-    :param fetch_timeout: timeout for subscription pull
     :param jetstream_options: additional options passed to nc.jetstream(...)
+    :param kv_options: options for nats KV initialization.
     :param kwargs: all other options for base classes NatsBroker, Broker.
     """
 
@@ -233,7 +235,6 @@ class JetStreamBroker(
             if key in consumer.options:
                 config_kwargs[key] = consumer.options[key]
         config = ConsumerConfig(**config_kwargs)
-        batch = consumer.options.get("batch", consumer.concurrency * 2)
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", 0.1)
         subscription = await self.js.pull_subscribe(
@@ -245,6 +246,13 @@ class JetStreamBroker(
             async with send_stream:
                 while True:
                     try:
+                        batch = consumer.concurrency - len(
+                            send_stream._state.buffer  # noqa: SLF001
+                        )
+                        if batch == 0:
+                            await asyncio.sleep(0.1)
+                            continue
+                        self.logger.debug("Fetching %d messages", batch)
                         messages = await subscription.fetch(
                             batch=batch,
                             timeout=fetch_timeout,
@@ -252,16 +260,15 @@ class JetStreamBroker(
                         )
                         for message in messages:
                             await send_stream.send(message)
-                    except FetchTimeoutError:  # noqa: PERF203
+                    except FetchTimeoutError:
                         pass
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
-            self.logger.info("Sender finished for %s", consumer.name)
+            self.logger.info("Stopped sender for consumer: %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
-        date = raw_message.metadata.timestamp.replace(tzinfo=timezone.utc)
-        return date < (utc_now() - timedelta(seconds=self.validate_error_delay))
+        return raw_message.metadata.num_delivered <= 3
 
     def get_num_delivered(self, raw_message: NatsMsg) -> int | None:
         return raw_message.metadata.num_delivered

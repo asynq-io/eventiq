@@ -25,4 +25,4 @@ service.add_middleware(SendMessageMiddleware)
 @service.subscribe(topic="test.topic", concurrency=2)
 async def example_run(message: CloudEvent):
     print("Received Message", message.id, "with data:", message.data)
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)

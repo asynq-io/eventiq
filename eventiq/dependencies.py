@@ -45,7 +45,7 @@ def resolved_func(
             annotation, default = v
             if annotation in state:
                 kwargs[k] = state[annotation]
-            elif default is Parameter.empty:
+            elif k not in kwargs and default is Parameter.empty:
                 err = f"Missing dependency {k}: {annotation}"
                 raise DependencyError(err)
 

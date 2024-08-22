@@ -234,18 +234,18 @@ class Service(Generic[Message, R], LoggerMixin):
             consumer.maybe_set_publisher(self.publish)
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
-                consumer.concurrency * 2,
+                consumer.concurrency,
             )
 
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
 
-            for i in range(1, consumer.concurrency + 1):
+            for i in range(consumer.concurrency):
                 self.logger.info("Starting consumer %s task %s", consumer.name, i)
                 tg.start_soon(
                     self.receiver,
                     consumer,
                     receive_stream.clone(),
-                    name=f"{consumer.name}:{i}",
+                    name=f"{consumer.name}:{i+1}",
                 )
             await self.dispatch_after("consumer_start", consumer=consumer)
 
@@ -465,8 +465,8 @@ class Service(Generic[Message, R], LoggerMixin):
     @asynccontextmanager
     async def subscription(
         self,
-        event_type: type[CloudEvent],
-        auto_ack: bool = False,
+        event_type: type[CloudEvent] = CloudEvent,
+        topic: str | None = None,
         **options: Any,
     ) -> AsyncIterator[
         MemoryObjectReceiveStream[tuple[CloudEvent, Callable[[], None]]]
@@ -483,8 +483,8 @@ class Service(Generic[Message, R], LoggerMixin):
         options["dynamic"] = True
         consumer = ChannelConsumer(
             channel=consumer_send,
-            auto_ack=auto_ack,
             event_type=event_type,
+            topic=topic,
             **options,
         )
 
