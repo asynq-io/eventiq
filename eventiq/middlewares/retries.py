@@ -4,8 +4,6 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Callable, Generic, NamedTuple
 
-from typing_extensions import ParamSpec
-
 from eventiq.exceptions import Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
 from eventiq.middleware import CloudEventType, Middleware
@@ -14,8 +12,6 @@ if TYPE_CHECKING:
     from eventiq import CloudEvent, Consumer, Service
     from eventiq.types import RetryStrategy
 
-
-P = ParamSpec("P")
 
 DelayGenerator = Callable[[CloudEventType, Exception], int]
 
@@ -27,7 +23,7 @@ class MessageStatus(NamedTuple):
 
 def expo(factor: int = 1) -> DelayGenerator:
     def _expo(message: CloudEvent, _: Exception) -> int:
-        return factor * message.age.seconds
+        return factor * int(message.age.total_seconds())
 
     return _expo
 
@@ -39,7 +35,7 @@ def constant(interval: int = 30) -> DelayGenerator:
     return _constant
 
 
-class BaseRetryStrategy(Generic[P, CloudEventType], LoggerMixin):
+class BaseRetryStrategy(Generic[CloudEventType], LoggerMixin):
     def __init__(
         self,
         *,
@@ -87,7 +83,7 @@ class BaseRetryStrategy(Generic[P, CloudEventType], LoggerMixin):
             self.fail(message, exc)
 
 
-class MaxAge(BaseRetryStrategy[P, CloudEventType]):
+class MaxAge(BaseRetryStrategy[CloudEventType]):
     def __init__(
         self,
         *,
@@ -111,7 +107,7 @@ class MaxAge(BaseRetryStrategy[P, CloudEventType]):
             self.fail(message, exc)
 
 
-class MaxRetries(BaseRetryStrategy[P, CloudEventType]):
+class MaxRetries(BaseRetryStrategy[CloudEventType]):
     def __init__(self, *, max_retries: int = 3, **extra: Any) -> None:
         super().__init__(**extra)
         self.max_retries = max_retries
@@ -134,7 +130,7 @@ class MaxRetries(BaseRetryStrategy[P, CloudEventType]):
             self.fail(message, exc)
 
 
-class RetryWhen(BaseRetryStrategy[P, CloudEventType]):
+class RetryWhen(BaseRetryStrategy[CloudEventType]):
     def __init__(
         self,
         *,
