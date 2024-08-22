@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     """:param auto_flush: auto flush messages on publish
+    :param auto_flush: auto flush on publish
     :param kwargs: options for base class
     """
 
@@ -146,10 +147,11 @@ class NatsBroker(AbstractNatsBroker[None]):
         *,
         headers: dict[str, str],
         reply: str = "",
+        flush: bool = False,
         **kwargs: Any,
     ) -> None:
         await self.client.publish(topic, body, headers=headers, reply=reply)
-        if self._auto_flush or kwargs.get("flush"):
+        if self._auto_flush or flush:
             await self.flush()
 
 
@@ -158,9 +160,8 @@ class JetStreamBroker(
     ResultBackend[NatsMsg, api.PubAck],
 ):
     """NatsBroker with JetStream enabled
-    :param prefetch_count: default number of messages to prefetch
-    :param fetch_timeout: timeout for subscription pull
     :param jetstream_options: additional options passed to nc.jetstream(...)
+    :param kv_options: options for nats KV initialization.
     :param kwargs: all other options for base classes NatsBroker, Broker.
     """
 
