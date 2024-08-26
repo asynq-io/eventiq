@@ -136,11 +136,11 @@ ignore = [
     "ARG004",
     "ASYNC109",
     "ANN401",
-    "B008",    # do not perform function calls in argument defaults
+    "B008",     # do not perform function calls in argument defaults
     "BLE001",
     "COM812",
     "D",
-    "E501",    # line too long
+    "E501",     # line too long
     "FA100",
     "FBT001",
     "FBT002",
@@ -151,7 +151,6 @@ ignore = [
     "PLR2004",
     "PTH123",
     "S108",
-
 ]
 
 

@@ -15,7 +15,7 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
     def __init__(self, service: Service, log_level: int = INFO) -> None:
         super().__init__(service)
         self.log_level = log_level
-        self._receive_registry: dict[ID, float] = {}
+        self._receive_registry: dict[tuple[str, ID], float] = {}
         self._publish_registry: dict[ID, float] = {}
 
     def _log_elapsed_time(
@@ -29,7 +29,7 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
     async def before_process_message(
         self, *, consumer: Consumer, message: CloudEventType
     ) -> None:
-        self._receive_registry[message.id] = perf_counter()
+        self._receive_registry[(consumer.name, message.id)] = perf_counter()
 
     async def after_process_message(
         self,
@@ -39,7 +39,9 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
         result: Any = None,
         exc: Exception | None = None,
     ) -> None:
-        start_time = self._receive_registry.pop(message.id, perf_counter())
+        start_time = self._receive_registry.pop(
+            (consumer.name, message.id), perf_counter()
+        )
         self._log_elapsed_time("processed", start_time)
 
     async def before_publish(self, *, message: CloudEventType, **kwargs: Any) -> None:

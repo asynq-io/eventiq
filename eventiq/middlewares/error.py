@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any, Callable
 
 from eventiq.middleware import CloudEventType, Middleware
-from eventiq.utils import to_async
+from eventiq.utils import is_async_callable, to_async
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
-
     from eventiq import Consumer, Service
 
 
@@ -16,13 +13,11 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
         service: Service,
-        callback: Callable[
-            [Service, Consumer, CloudEventType, Exception | None], Awaitable[Any]
-        ],
+        callback: Callable[[Service, Consumer, CloudEventType, Exception | None], Any],
         errors: type[Exception] | tuple[type[Exception]] = Exception,
     ) -> None:
         super().__init__(service)
-        if not asyncio.iscoroutinefunction(callback):
+        if not is_async_callable(callback):
             callback = to_async(callback)
         self.callback = callback
         self.exc = errors
