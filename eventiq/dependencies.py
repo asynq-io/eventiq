@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from typing_extensions import Concatenate, ParamSpec
 
-from .exceptions import DependencyError
-
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
@@ -21,9 +19,9 @@ def resolved_func(
 ) -> Callable[Concatenate[CloudEventType, P], Awaitable[Any]]:
     sig = signature(func)
     params = {
-        k: (v.annotation, v.default)
+        k: v.annotation
         for k, v in sig.parameters.items()
-        if k not in {"message", "args", "kwargs"}
+        if k != "message"
         and v.kind
         not in {
             Parameter.POSITIONAL_ONLY,
@@ -41,13 +39,9 @@ def resolved_func(
     ) -> Any:
         state = message.service.state
 
-        for k, v in params.items():
-            annotation, default = v
+        for k, annotation in params.items():
             if annotation in state:
                 kwargs[k] = state[annotation]
-            elif k not in kwargs and default is Parameter.empty:
-                err = f"Missing dependency {k}: {annotation}"
-                raise DependencyError(err)
 
         return await func(message, *args, **kwargs)
 
