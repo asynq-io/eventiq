@@ -13,10 +13,6 @@ class BrokerConnectionError(BrokerError):
     """Broker connection error."""
 
 
-class DependencyError(EventiqError):
-    """Exception raised when a required dependency could not be resolved."""
-
-
 class EncodeError(EventiqError):
     """Error encoding message."""
 
