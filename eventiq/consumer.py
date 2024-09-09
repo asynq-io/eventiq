@@ -153,8 +153,12 @@ class ChannelConsumer(Consumer[CloudEventType]):
         channel: MemoryObjectSendStream[tuple[CloudEventType, Callable[[], None]]],
         **extra: Any,
     ) -> None:
-        if "name" not in extra:
-            extra["name"] = f"{socket.gethostname()}:{uuid4()}"
+        name_parts = [socket.gethostname(), str(uuid4())]
+        base_name = extra.get("name")
+        if base_name:
+            name_parts.insert(0, base_name)
+        name = ":".join(name_parts)
+        extra["name"] = name
         super().__init__(**extra)
         self.channel = channel
         self._timeout = to_float(self.timeout) or 10.0
