@@ -126,9 +126,10 @@ class NatsBroker(AbstractNatsBroker[None]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
     ) -> None:
+        queue = "" if consumer.dynamic else f"{group}:{consumer.name}"
         subscription = await self.client.subscribe(
             subject=self.format_topic(consumer.topic),
-            queue=f"{group}:{consumer.name}",
+            queue=queue,
         )
         try:
             async with send_stream:
@@ -227,6 +228,7 @@ class JetStreamBroker(
         send_stream: MemoryObjectSendStream,
     ) -> None:
         config_kwargs: dict[str, Any] = {
+            "name": f"{group}:{consumer.name}",
             "ack_wait": (to_float(consumer.timeout) or self.default_consumer_timeout)
             + 30,
             "max_ack_pending": 10_000,
@@ -237,9 +239,10 @@ class JetStreamBroker(
         config = ConsumerConfig(**config_kwargs)
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", 0.1)
+        durable = None if consumer.dynamic else f"{group}:{consumer.name}"
         subscription = await self.js.pull_subscribe(
             subject=self.format_topic(consumer.topic),
-            durable=f"{group}:{consumer.name}",
+            durable=durable,
             config=config,
         )
         try:
