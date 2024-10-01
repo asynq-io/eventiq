@@ -167,11 +167,10 @@ class Service(Generic[Message, R], LoggerMixin):
         encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> R:
+        await self.dispatch_before("publish", message=message, **kwargs)
         message_topic, body, message_kwargs = self.prepare_message(
             message, topic, encoder, headers=headers, **kwargs
         )
-        topic = topic or message.topic
-        await self.dispatch_before("publish", message=message, **kwargs)
         res = await self.broker.publish(
             message_topic, body, headers=message.headers, **message_kwargs
         )
