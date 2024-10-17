@@ -287,7 +287,13 @@ class Service(Generic[Message, R], LoggerMixin):
 
     async def _dispatch(self, event: str, **kwargs: Any) -> None:
         message = kwargs.get("message")
-        for middleware in self.middlewares:
+        middlewares = (
+            reversed(self.middlewares)
+            if event.startswith("after_")
+            else self.middlewares
+        )
+
+        for middleware in middlewares:
             if message and (
                 middleware.requires is not None
                 and not isinstance(message, middleware.requires)
@@ -479,8 +485,7 @@ class Service(Generic[Message, R], LoggerMixin):
         consumer_send, user_receive = create_memory_object_stream[
             tuple[CloudEvent, Callable[[], None]]
         ](1)
-        options["dynamic"] = True
-        consumer = ChannelConsumer(
+        consumer: Consumer[CloudEvent] = ChannelConsumer(
             channel=consumer_send,
             event_type=event_type,
             topic=topic,
