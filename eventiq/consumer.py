@@ -148,17 +148,14 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
 
 
 class ChannelConsumer(Consumer[CloudEventType]):
-    def __inii__(
+    def __init__(
         self,
         channel: MemoryObjectSendStream[tuple[CloudEventType, Callable[[], None]]],
         **extra: Any,
     ) -> None:
-        name_parts = [socket.gethostname(), str(uuid4())]
-        base_name = extra.get("name")
-        if base_name:
-            name_parts.insert(0, base_name)
-        name = ":".join(name_parts)
-        extra["name"] = name
+        if "name" not in extra:
+            extra.setdefault("dynamic", True)
+            extra["name"] = f"{socket.gethostname()}:{uuid4()}"
         super().__init__(**extra)
         self.channel = channel
         self._timeout = to_float(self.timeout) or 10.0
