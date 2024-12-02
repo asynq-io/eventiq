@@ -169,7 +169,7 @@ class CloudEvent(BaseModel, Generic[D]):
 
 class Publishes(BaseModel):
     type: type[CloudEvent]
-    topic: str = Field("")
+    topic: str = ""
     parameters: dict[str, Parameter] = {}
     tags: list[str] = []
     summary: str = ""
