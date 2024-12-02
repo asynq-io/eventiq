@@ -34,12 +34,12 @@ class CloudEvent(BaseModel, Generic[D]):
     id: UUID = Field(default_factory=uuid4, description="Event ID", repr=True)
     time: datetime = Field(default_factory=utc_now, description="Event created time")
     topic: str = Field(
-        None,
+        "",
         alias="subject",
         description="Message subject (topic)",
         validate_default=True,
     )
-    type: str = Field(None, description="Event type", validate_default=True)
+    type: str = Field("", description="Event type", validate_default=True)
     source: Optional[str] = Field(None, description="Event source (app)")
     data: D = Field(..., description="Event payload")
     dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
@@ -104,9 +104,17 @@ class CloudEvent(BaseModel, Generic[D]):
     @field_validator("type", mode="before")
     @classmethod
     def get_default_type(cls, value: Any) -> str:
-        if value is None:
+        if not value:
             return cls.__name__
         return str(value)
+
+    @field_validator("topic", mode="after")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        if not value:
+            msg = "Topic is required"
+            raise ValueError(msg)
+        return value
 
     @property
     def raw(self) -> Any:
