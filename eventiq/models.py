@@ -169,7 +169,7 @@ class CloudEvent(BaseModel, Generic[D]):
 
 class Publishes(BaseModel):
     type: type[CloudEvent]
-    topic: str = Field(None)
+    topic: str = Field("")
     parameters: dict[str, Parameter] = {}
     tags: list[str] = []
     summary: str = ""
@@ -177,12 +177,11 @@ class Publishes(BaseModel):
 
     @model_validator(mode="after")
     def validate_topic(self) -> Self:
-        if self.topic is None:
-            topic = self.type.get_default_topic()
-            if topic is None:
-                msg = "Topic is required"
-                raise ValueError(msg)
-            self.topic = topic
+        topic = self.topic or self.type.get_default_topic()
+        if not topic:
+            msg = "Topic is required"
+            raise ValueError(msg)
+        self.topic = topic
         return self
 
     model_config = {
