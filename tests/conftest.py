@@ -34,12 +34,12 @@ def middleware():
     return EmptyMiddleware
 
 
-@pytest.fixture()
+@pytest.fixture
 def broker():
     return StubBroker()
 
 
-@pytest.fixture()
+@pytest.fixture
 def service(broker, middleware):
     svc = Service(name="test_service", broker=broker, state={int: 5})
     svc.add_middleware(middleware)
@@ -62,13 +62,13 @@ def handler():
     return example_handler
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_consumer(service, handler):
     service.subscribe(handler, topic="test_topic", name="test_consumer")
     return service.consumer_group.consumers["test_consumer"]
 
 
-@pytest.fixture()
+@pytest.fixture
 def generic_test_consumer(service) -> Consumer:
     generic_consumer_name = "test_generic_consumer"
 
@@ -84,7 +84,7 @@ def generic_test_consumer(service) -> Consumer:
     return service.consumer_group.consumers[generic_consumer_name]
 
 
-@pytest.fixture()
+@pytest.fixture
 def ce(service) -> CloudEvent:
     ce_ = CloudEvent.new(
         {"today": utc_now().date().isoformat(), "arr": [1, "2", 3.0]},
@@ -95,7 +95,7 @@ def ce(service) -> CloudEvent:
     return ce_
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_consumer():
     # this is workaround for inspect.getsignature() of AsyncMock
     # https://github.com/python/cpython/issues/96127

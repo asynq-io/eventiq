@@ -6,13 +6,13 @@ from .models import CloudEvent, Publishes
 from .service import Service
 
 __all__ = [
-    "__version__",
     "Broker",
+    "CloudEvent",
     "Consumer",
     "ConsumerGroup",
-    "CloudEvent",
-    "Publishes",
     "GenericConsumer",
     "Middleware",
+    "Publishes",
     "Service",
+    "__version__",
 ]

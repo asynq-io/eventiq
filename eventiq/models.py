@@ -34,12 +34,12 @@ class CloudEvent(BaseModel, Generic[D]):
     id: UUID = Field(default_factory=uuid4, description="Event ID", repr=True)
     time: datetime = Field(default_factory=utc_now, description="Event created time")
     topic: str = Field(
-        None,
+        "",
         alias="subject",
         description="Message subject (topic)",
         validate_default=True,
     )
-    type: str = Field(None, description="Event type", validate_default=True)
+    type: str = Field("", description="Event type", validate_default=True)
     source: Optional[str] = Field(None, description="Event source (app)")
     data: D = Field(..., description="Event payload")
     dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
@@ -104,9 +104,17 @@ class CloudEvent(BaseModel, Generic[D]):
     @field_validator("type", mode="before")
     @classmethod
     def get_default_type(cls, value: Any) -> str:
-        if value is None:
+        if not value:
             return cls.__name__
         return str(value)
+
+    @field_validator("topic", mode="after")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        if not value:
+            msg = "Topic is required"
+            raise ValueError(msg)
+        return value
 
     @property
     def raw(self) -> Any:
@@ -161,7 +169,7 @@ class CloudEvent(BaseModel, Generic[D]):
 
 class Publishes(BaseModel):
     type: type[CloudEvent]
-    topic: str = Field(None)
+    topic: str = ""
     parameters: dict[str, Parameter] = {}
     tags: list[str] = []
     summary: str = ""
@@ -169,12 +177,11 @@ class Publishes(BaseModel):
 
     @model_validator(mode="after")
     def validate_topic(self) -> Self:
-        if self.topic is None:
-            topic = self.type.get_default_topic()
-            if topic is None:
-                msg = "Topic is required"
-                raise ValueError(msg)
-            self.topic = topic
+        topic = self.topic or self.type.get_default_topic()
+        if not topic:
+            msg = "Topic is required"
+            raise ValueError(msg)
+        self.topic = topic
         return self
 
     model_config = {
