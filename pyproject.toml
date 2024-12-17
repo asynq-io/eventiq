@@ -67,7 +67,7 @@ dependencies = [
     "pytest-repeat",
     "pyyaml",
     "ruff",
-    "mypy==1.11.1",
+    "mypy==1.13.0",
     "bandit",
     "nats-py",
     "aiokafka",

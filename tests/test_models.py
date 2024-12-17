@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from eventiq import CloudEvent
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_event_cls():
     class TestEvent(CloudEvent[str], topic="events.{type}", validate_topic=True):
         pass
@@ -12,7 +12,7 @@ def test_event_cls():
     return TestEvent
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_command_cls():
     class TestCommand(CloudEvent[str], topic="commands.command_a"):
         pass
