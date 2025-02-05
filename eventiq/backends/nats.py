@@ -10,12 +10,9 @@ from nats.aio.msg import Msg as NatsMsg
 from nats.errors import TimeoutError as NatsTimeoutError
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
-from nats.js.errors import KeyNotFoundError
 from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
-from eventiq.exceptions import BrokerError
-from eventiq.results import ResultBackend
 from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float
 
@@ -33,12 +30,10 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 class JetStreamSettings(NatsSettings):
     jetstream_options: dict[str, Any] = Field({})
-    kv_options: dict[str, Any] = Field({})
 
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
-    from nats.js.kv import KeyValue
 
     from eventiq import Consumer
 
@@ -159,7 +154,6 @@ class NatsBroker(AbstractNatsBroker[None]):
 
 class JetStreamBroker(
     AbstractNatsBroker[api.PubAck],
-    ResultBackend[NatsMsg, api.PubAck],
 ):
     """NatsBroker with JetStream enabled
     :param jetstream_options: additional options passed to nc.jetstream(...)
@@ -168,39 +162,16 @@ class JetStreamBroker(
     """
 
     Settings = JetStreamSettings
-    kv_error = "KeyVal not initialized"
 
     def __init__(
         self,
         *,
         jetstream_options: dict[str, Any] | None = None,
-        kv_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.jetstream_options = jetstream_options or {}
         self.js = JetStreamContext(self.client, **self.jetstream_options)
-        self.kv_options = kv_options or {}
-        self._kv: KeyValue | None = None
-
-    async def init_storage(self) -> None:
-        self._kv = await self.js.create_key_value(**self.kv_options)
-
-    @property
-    def kv(self) -> KeyValue:
-        if self._kv is None:
-            raise BrokerError(self.kv_error)
-        return self._kv
-
-    async def get_result(self, key: str) -> bytes | None:
-        try:
-            data = await self.kv.get(key)
-            return data.value  # noqa: TRY300
-        except KeyNotFoundError:
-            self.logger.warning("Key %s not found", key)
-
-    async def store_result(self, key: str, result: bytes) -> None:
-        await self.kv.put(key, result)
 
     async def publish(
         self,

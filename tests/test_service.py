@@ -24,9 +24,8 @@ async def test_bulk_publish(
     messages = [ce] * 10
     for message in messages:
         assert "Content-Type" not in message.headers
-        assert message.source is None
+        assert message.source == running_service.name
     await running_service.bulk_publish(messages)
     assert mock_consumer.call_count == 10
     for message in messages:
         assert message.headers["Content-Type"] == "application/json"
-        assert message.source == running_service.name
