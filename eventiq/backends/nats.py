@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Annotated, Any, Callable
 import anyio
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
+from nats.errors import TimeoutError as NatsTimeoutError
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
-from nats.js.errors import FetchTimeoutError, KeyNotFoundError
+from nats.js.errors import KeyNotFoundError
 from pydantic import AnyUrl, Field, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
@@ -263,8 +264,8 @@ class JetStreamBroker(
                         )
                         for message in messages:
                             await send_stream.send(message)
-                    except FetchTimeoutError:
-                        pass
+                    except NatsTimeoutError:
+                        self.logger.debug("Suppressing nats timeout error")
         finally:
             if consumer.dynamic:
                 await subscription.unsubscribe()
