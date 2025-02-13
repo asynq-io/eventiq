@@ -9,7 +9,7 @@ repos:
         args: [--allow-multiple-documents]
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: "v0.8.0"
+    rev: "v0.9.4"
     hooks:
       - id: ruff
         args: ["--fix"]
