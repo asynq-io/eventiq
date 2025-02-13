@@ -85,13 +85,13 @@ def generic_test_consumer(service) -> Consumer:
 
 
 @pytest.fixture
-def ce(service) -> CloudEvent:
+def ce() -> CloudEvent:
     ce_ = CloudEvent.new(
         {"today": utc_now().date().isoformat(), "arr": [1, "2", 3.0]},
         type="TestEvent",
         topic="test_topic",
     )
-    ce_.set_context(service, None, {})
+    ce_.set_context(None, {})
     return ce_
 
 
