@@ -244,7 +244,7 @@ class Service(Generic[Message, R], LoggerMixin):
                     self.receiver,
                     consumer,
                     receive_stream.clone(),
-                    name=f"{consumer.name}:{i+1}",
+                    name=f"{consumer.name}:{i + 1}",
                 )
             await self.dispatch_after("consumer_start", consumer=consumer)
 
