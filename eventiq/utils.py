@@ -118,7 +118,7 @@ def to_float(timeout: Timeout | None) -> float | None:
 
 
 def get_annotation(value: str) -> type:
-    return cast(type, Literal[value])
+    return cast("type", Literal[value])
 
 
 T = TypeVar("T")
