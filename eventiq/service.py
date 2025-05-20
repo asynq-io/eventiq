@@ -83,6 +83,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.state[Publisher] = self.publish
         self.options = options
         self.default_action = getattr(self, self.broker.default_on_exc)
+        CloudEvent.service = self
 
     def add_middleware(
         self, middleware: MiddlewareType[P], *args: P.args, **kwargs: P.kwargs
@@ -123,8 +124,6 @@ class Service(Generic[Message, R], LoggerMixin):
     ) -> PreparedMessage:
         message_topic = topic or message.topic
         encoder = encoder or self.encoder
-        if message.source is None:
-            message.source = self.name
         message.content_type = encoder.CONTENT_TYPE
         message.headers["Content-Type"] = encoder.CONTENT_TYPE
         if topic:
@@ -230,7 +229,6 @@ class Service(Generic[Message, R], LoggerMixin):
 
     async def start_consumers(self, tg: TaskGroup) -> None:
         for consumer in self.consumers.values():
-            consumer.maybe_set_publisher(self.publish)
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
                 consumer.concurrency,
@@ -376,7 +374,7 @@ class Service(Generic[Message, R], LoggerMixin):
         try:
             data, headers = self.broker.decode_message(raw_message)
             message = decoder.decode(data, consumer.event_type)
-            message.set_context(self, raw_message, headers)
+            message.set_context(raw_message, headers)
         except (DecodeError, ValidationError) as e:
             self.logger.exception(
                 "Failed to validate message %s.",
