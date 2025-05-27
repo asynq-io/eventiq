@@ -409,6 +409,7 @@ class Service(Generic[Message, R], LoggerMixin):
         except anyio.get_cancelled_exc_class() as e:
             exc = ConsumerCancelledError("Consumer cancelled")
             exc.__cause__ = e
+            raise
         finally:
             await self._handle_message_finalization(consumer, message, result, exc)
 
