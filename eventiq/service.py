@@ -370,7 +370,7 @@ class Service(Generic[Message, R], LoggerMixin):
         decoder: Decoder,
         timeout: float,
     ) -> None:
-        exc: Exception | None = None
+        exc: BaseException | None = None
         result = None
 
         try:
@@ -404,21 +404,17 @@ class Service(Generic[Message, R], LoggerMixin):
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
-        except Exception as e:
+        except BaseException as e:
             exc = e
-        except anyio.get_cancelled_exc_class():
-            with anyio.move_on_after(1, shield=True):
-                # directly call nack skipping all middlewares
-                await self.broker.nack(raw_message)
-            raise
-        await self._handle_message_finalization(consumer, message, result, exc)
+        finally:
+            await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(
         self,
         consumer: Consumer,
         message: CloudEvent,
         result: Any,
-        exc: Exception | None,
+        exc: BaseException | None,
     ) -> None:
         try:
             await self.dispatch_after(
@@ -428,7 +424,7 @@ class Service(Generic[Message, R], LoggerMixin):
                 result=result,
                 exc=exc,
             )
-        except Exception as e:
+        except BaseException as e:
             exc = e
 
         if exc is None:

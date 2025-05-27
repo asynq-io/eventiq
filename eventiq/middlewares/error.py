@@ -13,8 +13,10 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
     def __init__(
         self,
         service: Service,
-        callback: Callable[[Service, Consumer, CloudEventType, Exception | None], Any],
-        errors: type[Exception] | tuple[type[Exception]] = Exception,
+        callback: Callable[
+            [Service, Consumer, CloudEventType, BaseException | None], Any
+        ],
+        errors: type[BaseException] | tuple[type[BaseException]] = BaseException,
     ) -> None:
         super().__init__(service)
         if not is_async_callable(callback):
@@ -28,7 +30,7 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         consumer: Consumer,
         message: CloudEventType,
         result: Any | None = None,
-        exc: Exception | None = None,
+        exc: BaseException | None = None,
     ) -> None:
         if exc and isinstance(exc, self.exc):
             await self.callback(self.service, consumer, message, exc)

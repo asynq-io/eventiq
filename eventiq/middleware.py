@@ -134,6 +134,6 @@ class Middleware(Generic[CloudEventType], LoggerMixin):
         consumer: Consumer,
         message: CloudEventType,
         result: Any = None,
-        exc: Exception | None = None,
+        exc: BaseException | None = None,
     ) -> None:
         """Called after message is processed (but not acknowledged/rejected yet)."""

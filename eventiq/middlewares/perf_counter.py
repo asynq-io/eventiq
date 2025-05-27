@@ -37,7 +37,7 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
         consumer: Consumer,
         message: CloudEventType,
         result: Any = None,
-        exc: Exception | None = None,
+        exc: BaseException | None = None,
     ) -> None:
         start_time = self._receive_registry.pop(
             (consumer.name, message.id), perf_counter()

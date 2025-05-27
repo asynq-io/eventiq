@@ -46,7 +46,7 @@ class ResultBackendMiddleware(Middleware):
         consumer: Consumer,
         message: CloudEvent,
         result: Any | None = None,
-        exc: Exception | None = None,
+        exc: BaseException | None = None,
     ) -> None:
         if not all([result, exc is None, consumer.store_results]):
             return
