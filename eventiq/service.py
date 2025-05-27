@@ -411,7 +411,8 @@ class Service(Generic[Message, R], LoggerMixin):
             exc.__cause__ = e
             raise
         finally:
-            await self._handle_message_finalization(consumer, message, result, exc)
+            with anyio.move_on_after(1, shield=True):
+                await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(
         self,
