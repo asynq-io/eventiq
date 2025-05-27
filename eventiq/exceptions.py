@@ -5,6 +5,10 @@ class EventiqError(Exception):
     """Base exception for Eventiq."""
 
 
+class ConsumerCancelledError(EventiqError):
+    """Wrapper for cancelled errors"""
+
+
 class BrokerError(EventiqError):
     """Base Exception for broker related errors."""
 
