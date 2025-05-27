@@ -13,7 +13,7 @@ from .broker import Broker, BulkMessage, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
 from .decoder import DEFAULT_DECODER
 from .encoder import DEFAULT_ENCODER
-from .exceptions import DecodeError, Fail, Retry, Skip
+from .exceptions import ConsumerCancelledError, DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
 from .types import (
@@ -406,12 +406,11 @@ class Service(Generic[Message, R], LoggerMixin):
                 result = await consumer.process(message)
         except Exception as e:
             exc = e
-        except anyio.get_cancelled_exc_class():
-            with anyio.move_on_after(1, shield=True):
-                # directly call nack skipping all middlewares
-                await self.broker.nack(raw_message)
-            raise
-        await self._handle_message_finalization(consumer, message, result, exc)
+        except anyio.get_cancelled_exc_class() as e:
+            exc = ConsumerCancelledError("Consumer cancelled")
+            exc.__cause__ = e
+        finally:
+            await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(
         self,
