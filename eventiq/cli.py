@@ -145,7 +145,10 @@ def docs(
         help="Output format. Valid options are 'yaml' and 'json'(default)",
     ),
 ) -> None:
-    from eventiq.asyncapi import get_async_api_spec, save_async_api_to_file
+    from eventiq.asyncapi import (
+        get_async_api_spec,
+        save_async_api_to_file,
+    )
 
     svc = import_service(service)
     spec = get_async_api_spec(svc)

@@ -47,7 +47,7 @@ async def nullcontext(_: Service) -> AsyncIterator[None]:
     yield
 
 
-class Service(Generic[Message, R], LoggerMixin):
+class Service(LoggerMixin, Generic[Message, R]):
     """Logical group of consumers. Provides group (queue) name and handles versioning."""
 
     default_middlewares: ClassVar[list[MiddlewareType]] = []
