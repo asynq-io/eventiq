@@ -35,7 +35,7 @@ class BulkMessage(NamedTuple):
     kwargs: dict[str, Any]
 
 
-class Broker(Generic[Message, R], LoggerMixin, ABC):
+class Broker(LoggerMixin, ABC, Generic[Message, R]):
     """Base broker class
     :param description: Broker (Server) Description
     :param encoder: Encoder (Serializer) class

@@ -35,7 +35,7 @@ def constant(interval: int = 30) -> DelayGenerator:
     return _constant
 
 
-class BaseRetryStrategy(Generic[CloudEventType], LoggerMixin):
+class BaseRetryStrategy(LoggerMixin, Generic[CloudEventType]):
     def __init__(
         self,
         *,

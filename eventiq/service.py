@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import signal
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
@@ -28,6 +29,10 @@ from .types import (
 )
 from .utils import to_float
 
+DEFAULT_MIDDLEWARE_TIMEOUT: int = int(
+    os.getenv("EVENTIQ_DEFAULT_MIDDLEWARE_TIMEOUT", "10")
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
@@ -42,7 +47,7 @@ async def nullcontext(_: Service) -> AsyncIterator[None]:
     yield
 
 
-class Service(Generic[Message, R], LoggerMixin):
+class Service(LoggerMixin, Generic[Message, R]):
     """Logical group of consumers. Provides group (queue) name and handles versioning."""
 
     default_middlewares: ClassVar[list[MiddlewareType]] = []
@@ -61,6 +66,7 @@ class Service(Generic[Message, R], LoggerMixin):
         publishes: list[Publishes] | None = None,
         async_api_extra: dict[str, Any] | None = None,
         state: dict[type | str, Any] | None = None,
+        middleware_timeout: int = DEFAULT_MIDDLEWARE_TIMEOUT,
         **options: Any,
     ) -> None:
         self.broker = broker
@@ -81,6 +87,7 @@ class Service(Generic[Message, R], LoggerMixin):
         self.async_api_extra = async_api_extra or {}
         self.state = state or {}
         self.state[Publisher] = self.publish
+        self.middleware_timeout = middleware_timeout
         self.options = options
         self.default_action = getattr(self, self.broker.default_on_exc)
 
@@ -292,28 +299,28 @@ class Service(Generic[Message, R], LoggerMixin):
             if event.startswith("after_")
             else self.middlewares
         )
+        with anyio.fail_after(self.middleware_timeout, shield=True):
+            for middleware in middlewares:
+                if message and (
+                    middleware.requires is not None
+                    and not isinstance(message, middleware.requires)
+                ):
+                    self.logger.debug(
+                        "Skipping event %s for middleware %s",
+                        event,
+                        type(middleware).__name__,
+                    )
+                    continue
+                method = getattr(middleware, event, None)
+                if method is None:
+                    self.logger.debug(
+                        "Method %s not found in middleware %s",
+                        event,
+                        type(middleware).__name__,
+                    )
+                    continue
 
-        for middleware in middlewares:
-            if message and (
-                middleware.requires is not None
-                and not isinstance(message, middleware.requires)
-            ):
-                self.logger.debug(
-                    "Skipping event %s for middleware %s",
-                    event,
-                    type(middleware).__name__,
-                )
-                continue
-            method = getattr(middleware, event, None)
-            if method is None:
-                self.logger.debug(
-                    "Method %s not found in middleware %s",
-                    event,
-                    type(middleware).__name__,
-                )
-                continue
-
-            await method(**kwargs)
+                await method(**kwargs)
 
     async def dispatch_before(self, event: str, **kwargs: Any) -> None:
         await self._dispatch(f"before_{event}", **kwargs)
@@ -411,8 +418,7 @@ class Service(Generic[Message, R], LoggerMixin):
             exc.__cause__ = e
             raise
         finally:
-            with anyio.move_on_after(1, shield=True):
-                await self._handle_message_finalization(consumer, message, result, exc)
+            await self._handle_message_finalization(consumer, message, result, exc)
 
     async def _handle_message_finalization(
         self,

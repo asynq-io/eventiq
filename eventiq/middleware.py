@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from .service import Service
 
 
-class Middleware(Generic[CloudEventType], LoggerMixin):
+class Middleware(LoggerMixin, Generic[CloudEventType]):
     """Base class for middlewares."""
 
     requires: type[CloudEventType] | None = None
