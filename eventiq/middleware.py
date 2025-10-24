@@ -25,6 +25,9 @@ class Middleware(LoggerMixin, Generic[CloudEventType]):
     async def after_broker_connect(self) -> None:
         """Called after broker connects."""
 
+    async def before_close_consumers(self) -> None:
+        """Called before close consumers."""
+
     async def before_broker_disconnect(self) -> None:
         """Called before broker disconnects."""
 
