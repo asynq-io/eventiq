@@ -213,10 +213,10 @@ class Service(LoggerMixin, Generic[Message, R]):
     ) -> None:
         bulk_messages: list[BulkMessage] = []
         for message in messages:
+            await self.dispatch_before("publish", message=message, **kwargs)
             message_topic, body, message_kwargs = self.prepare_message(
                 message, topic, encoder, headers=headers, **kwargs
             )
-            await self.dispatch_before("publish", message=message, **kwargs)
             msg = BulkMessage(message_topic, body, message.headers, message_kwargs)
             bulk_messages.append(msg)
 
@@ -290,6 +290,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
             async for signum in signals:
                 self.logger.info("Received signal %s", signum.name)
+                await self.dispatch_before("close_consumers")
                 scope.cancel()
 
     async def _dispatch(self, event: str, **kwargs: Any) -> None:
