@@ -1,19 +1,19 @@
+import contextlib
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Optional, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import (
-    AnyUrl,
     BaseModel,
+    ConfigDict,
     Field,
     PrivateAttr,
-    field_validator,
     model_validator,
 )
 from pydantic.fields import FieldInfo, _FieldInfoInputs
 from typing_extensions import Self
 
-from .types import Parameter
+from .types import Encoder, Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
 
 if TYPE_CHECKING:
@@ -24,6 +24,15 @@ D = TypeVar("D", bound=Any)
 
 class CloudEvent(BaseModel, Generic[D]):
     """Base Schema for all messages."""
+
+    model_config = ConfigDict(
+        use_enum_values=True,
+        populate_by_name=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
+
+    service: ClassVar["Service"]
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
     content_type: Optional[str] = Field(
@@ -37,16 +46,14 @@ class CloudEvent(BaseModel, Generic[D]):
         "",
         alias="subject",
         description="Message subject (topic)",
-        validate_default=True,
     )
-    type: str = Field("", description="Event type", validate_default=True)
+    type: str = Field("", description="Event type")
     source: Optional[str] = Field(None, description="Event source (app)")
-    data: D = Field(..., description="Event payload")
-    dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
+    data: D = Field(description="Event payload")
+    dataschema: Optional[str] = Field(None, description="Data schema URI")
 
     _raw: Optional[Any] = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
-    _service: Optional["Service"] = PrivateAttr(None)
 
     def __init_subclass__(
         cls,
@@ -89,32 +96,24 @@ class CloudEvent(BaseModel, Generic[D]):
     def __hash__(self) -> int:
         return hash(self.id)
 
-    def __str__(self) -> str:
-        return (
-            f"{type(self).__name__}(type={self.type}, topic={self.topic}, id={self.id})"
-        )
-
-    def __repr__(self) -> str:
-        return str(self)
+    @model_validator(mode="after")
+    def validate_cloud_event(self: Self) -> Self:
+        if not self.topic:
+            topic = self.get_default_topic()
+            if not topic:
+                msg = "Topic is required"
+                raise ValueError(msg)
+            self.topic = topic
+        if not self.type:
+            self.type = type(self).__name__
+        if self.source is None:
+            with contextlib.suppress(AttributeError):
+                self.source = self.service.name
+        return self
 
     @classmethod
     def get_default_topic(cls) -> Optional[str]:
         return cls.model_fields["topic"].get_default()
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def get_default_type(cls, value: Any) -> str:
-        if not value:
-            return cls.__name__
-        return str(value)
-
-    @field_validator("topic", mode="after")
-    @classmethod
-    def validate_topic(cls, value: str) -> str:
-        if not value:
-            msg = "Topic is required"
-            raise ValueError(msg)
-        return value
 
     @property
     def raw(self) -> Any:
@@ -123,30 +122,18 @@ class CloudEvent(BaseModel, Generic[D]):
             raise ValueError(msg)
         return self._raw
 
-    @property
-    def service(self) -> "Service":
-        if self._service is None:
-            msg = "Service not set"
-            raise ValueError(msg)
-        return self._service
-
-    def set_context(
-        self, service: "Service", raw: Any, headers: dict[str, str]
-    ) -> None:
-        self._service = service
+    def set_context(self, raw: Any, headers: dict[str, str]) -> None:
         self._raw = raw
         self._headers = headers
 
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        kwargs.setdefault("by_alias", True)
-        kwargs.setdefault("exclude_none", True)
-        return super().model_dump(**kwargs)
+    def model_dump(self, by_alias: bool = True, **kwargs: Any) -> dict[str, Any]:
+        return super().model_dump(by_alias=by_alias, **kwargs)
 
     @classmethod
     def new(
-        cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
+        cls, data: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
     ) -> Self:
-        self = cls(data=obj, **kwargs)
+        self = cls(data=data, **kwargs)
         if headers:
             self._headers.update(headers)
         return self
@@ -159,12 +146,29 @@ class CloudEvent(BaseModel, Generic[D]):
     def headers(self) -> dict[str, str]:
         return self._headers
 
-    model_config = {
-        "use_enum_values": True,
-        "populate_by_name": True,
-        "extra": "allow",
-        "arbitrary_types_allowed": True,
-    }
+    async def publish(
+        self,
+        topic: Optional[str] = None,
+        headers: Optional[dict[str, Any]] = None,
+        encoder: Optional[Encoder] = None,
+        **kwargs: Any,
+    ) -> Any:
+        return await self.service.publish(
+            self, topic=topic, headers=headers, encoder=encoder, **kwargs
+        )
+
+    @classmethod
+    async def create(
+        cls,
+        data: D,
+        *,
+        headers: Optional[dict[str, str]] = None,
+        publish_options: Optional[dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Self:
+        self = cls.new(data, headers=headers, **kwargs)
+        await cls.service.publish(self, **(publish_options or {}))
+        return self
 
 
 class Publishes(BaseModel):
