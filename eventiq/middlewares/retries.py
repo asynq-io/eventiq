@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Callable, Generic, NamedTuple
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple
 
 from eventiq.exceptions import Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
@@ -73,7 +73,7 @@ class BaseRetryStrategy(LoggerMixin, Generic[CloudEventType]):
 
     def maybe_retry(
         self,
-        service: Service,
+        _service: Service,
         message: CloudEventType,
         exc: Exception,
     ) -> None:
@@ -102,7 +102,7 @@ class MaxAge(BaseRetryStrategy[CloudEventType]):
         exc: Exception,
     ) -> None:
         if message.age <= self.max_age:
-            super().maybe_retry(service=service, message=message, exc=exc)
+            super().maybe_retry(service, message, exc)
         else:
             self.fail(message, exc)
 
@@ -125,7 +125,7 @@ class MaxRetries(BaseRetryStrategy[CloudEventType]):
             )
             retries = int(message.age.total_seconds() ** 0.5)
         if retries <= self.max_retries:
-            super().maybe_retry(service=service, message=message, exc=exc)
+            super().maybe_retry(service, message, exc)
         else:
             self.fail(message, exc)
 
@@ -147,7 +147,7 @@ class RetryWhen(BaseRetryStrategy[CloudEventType]):
         exc: Exception,
     ) -> None:
         if self.retry_when(message, exc):
-            super().maybe_retry(service=service, message=message, exc=exc)
+            super().maybe_retry(service, message, exc)
         else:
             self.fail(message, exc)
 

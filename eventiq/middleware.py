@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Generic
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .logging import LoggerMixin
 from .types import CloudEventType
@@ -11,13 +11,11 @@ if TYPE_CHECKING:
     from .service import Service
 
 
-class Middleware(LoggerMixin, Generic[CloudEventType]):
+class MiddlewareProtocol(Protocol[CloudEventType]):
     """Base class for middlewares."""
 
     requires: type[CloudEventType] | None = None
-
-    def __init__(self, service: Service) -> None:
-        self.service = service
+    service: Service
 
     async def before_broker_connect(self) -> None:
         """Called before broker connects."""
@@ -140,3 +138,8 @@ class Middleware(LoggerMixin, Generic[CloudEventType]):
         exc: Exception | None = None,
     ) -> None:
         """Called after message is processed (but not acknowledged/rejected yet)."""
+
+
+class Middleware(MiddlewareProtocol[CloudEventType], LoggerMixin):
+    def __init__(self, service: Service) -> None:
+        self.service = service

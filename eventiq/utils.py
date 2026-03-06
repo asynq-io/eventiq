@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import functools
+import inspect
 import re
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Literal,
+    TypeGuard,
     TypeVar,
     cast,
     get_type_hints,
@@ -18,7 +18,7 @@ from typing import (
 from urllib.parse import urlparse
 
 from anyio import to_thread
-from typing_extensions import ParamSpec, TypeGuard
+from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
     from eventiq.types import Timeout
@@ -38,9 +38,9 @@ def utc_now() -> datetime:
 def to_async(func: Callable[P, R]) -> Callable[P, Awaitable[R]]:
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> Awaitable[R]:
-        if not kwargs:
-            return to_thread.run_sync(func, *args)
-        return to_thread.run_sync(functools.partial(func, *args, **kwargs))
+        if args or kwargs:
+            return to_thread.run_sync(functools.partial(func, *args, **kwargs))
+        return to_thread.run_sync(func)
 
     return wrapper
 
@@ -139,6 +139,6 @@ def is_async_callable(obj: Any) -> Any:
     while isinstance(obj, functools.partial):
         obj = obj.func
 
-    return asyncio.iscoroutinefunction(obj) or (
-        callable(obj) and asyncio.iscoroutinefunction(obj.__call__)
+    return inspect.iscoroutinefunction(obj) or (
+        callable(obj) and inspect.iscoroutinefunction(obj.__call__)
     )

@@ -19,15 +19,23 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
         self._publish_registry: dict[ID, float] = {}
 
     def _log_elapsed_time(
-        self, operation: Literal["processed", "published"], start_time: float
+        self,
+        operation: Literal["processed", "published"],
+        start_time: float,
     ) -> None:
         elapsed = perf_counter() - start_time
         self.logger.log(
-            self.log_level, "Message %s in %.2f seconds.", operation, elapsed
+            self.log_level,
+            "Message %s in %.2f seconds.",
+            operation,
+            elapsed,
         )
 
     async def before_process_message(
-        self, *, consumer: Consumer, message: CloudEventType
+        self,
+        *,
+        consumer: Consumer,
+        message: CloudEventType,
     ) -> None:
         self._receive_registry[(consumer.name, message.id)] = perf_counter()
 
@@ -36,17 +44,17 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
         *,
         consumer: Consumer,
         message: CloudEventType,
-        result: Any = None,
-        exc: Exception | None = None,
+        **_: Any,
     ) -> None:
         start_time = self._receive_registry.pop(
-            (consumer.name, message.id), perf_counter()
+            (consumer.name, message.id),
+            perf_counter(),
         )
         self._log_elapsed_time("processed", start_time)
 
-    async def before_publish(self, *, message: CloudEventType, **kwargs: Any) -> None:
+    async def before_publish(self, *, message: CloudEventType, **_: Any) -> None:
         self._publish_registry[message.id] = perf_counter()
 
-    async def after_publish(self, *, message: CloudEventType, **kwargs: Any) -> None:
+    async def after_publish(self, *, message: CloudEventType, **_: Any) -> None:
         start_time = self._publish_registry.pop(message.id, perf_counter())
         self._log_elapsed_time("published", start_time)

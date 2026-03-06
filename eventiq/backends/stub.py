@@ -54,7 +54,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         )
         self.wait_on_publish = wait_on_publish
         self._delay_queue: asyncio.Queue[tuple[StubMessage, datetime]] = asyncio.Queue(
-            1000
+            1000,
         )
         self._connected = False
         self._delay_task: asyncio.Task | None = None
@@ -79,6 +79,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[StubMessage],
     ) -> None:
+        _ = group
         queue = self.topics[self.format_topic(consumer.topic)]
         async with send_stream:
             while self._connected:
@@ -112,7 +113,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         body: bytes,
         *,
         headers: dict[str, str],
-        **kwargs: Any,
+        **_: Any,
     ) -> dict[str, asyncio.Event]:
         response = {}
         for target_topic, queue in self.topics.items():

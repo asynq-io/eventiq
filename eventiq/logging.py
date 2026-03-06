@@ -16,5 +16,5 @@ class LoggerMixin:
     logger: logging.Logger
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        cls.logger = get_logger(__name__, cls)
+        cls.logger = get_logger(cls.__module__, cls)
         super().__init_subclass__(**kwargs)

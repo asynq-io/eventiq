@@ -1,7 +1,6 @@
 import logging.config
 import sys
 from pathlib import Path
-from typing import Optional
 
 import anyio
 import typer
@@ -29,10 +28,11 @@ def import_service(path: str) -> Service:
 
 def _build_target_from_opts(
     service: str,
-    log_level: Optional[str],
-    log_config: Optional[str],
-    use_uvloop: Optional[bool],
-    debug: Optional[bool],
+    log_level: str | None,
+    log_config: str | None,
+    *,
+    use_uvloop: bool | None,
+    debug: bool | None,
 ) -> str:
     cmd = [f"eventiq run {service}"]
     if log_level:
@@ -49,17 +49,18 @@ def _build_target_from_opts(
 @cli.command(help="Run service")
 def run(
     service: str,
-    log_level: Optional[str] = typer.Option(
+    *,
+    log_level: str | None = typer.Option(
         None,
         help="Logger level, accepted values are: debug, info, warning, error, critical",
     ),
-    log_config: Optional[str] = typer.Option(
+    log_config: str | None = typer.Option(
         None,
         help="Logging file configuration path.",
     ),
-    use_uvloop: Optional[bool] = typer.Option(None, help="Enable uvloop"),
-    debug: bool = typer.Option(False, help="Enable debug"),
-    reload: Optional[str] = typer.Option(None, help="Hot-reload on provided path"),
+    use_uvloop: bool | None = typer.Option(None, help="Enable uvloop"),
+    debug: bool = typer.Option(default=False, help="Enable debug"),
+    reload: str | None = typer.Option(None, help="Hot-reload on provided path"),
 ) -> None:
     if reload:
         try:
@@ -74,8 +75,8 @@ def run(
             service,
             log_level,
             log_config,
-            use_uvloop,
-            debug,
+            use_uvloop=use_uvloop,
+            debug=debug,
         )
         run_process(
             reload,
@@ -94,7 +95,6 @@ def run(
     logger.info("Running service: %s", service)
     anyio.run(
         instance.run,
-        True,
         backend="asyncio",
         backend_options={"use_uvloop": use_uvloop, "debug": debug},
     )

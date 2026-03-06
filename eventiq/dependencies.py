@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import functools
 from inspect import Parameter, signature
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Concatenate
 
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from .types import CloudEventType
 
@@ -35,7 +35,9 @@ def resolved_func(
 
     @functools.wraps(func)
     async def wrapped(
-        message: CloudEventType, *args: P.args, **kwargs: P.kwargs
+        message: CloudEventType,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> Any:
         state = message.service.state
 

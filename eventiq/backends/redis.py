@@ -62,8 +62,12 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         return self._redis
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ) -> None:
+        _ = group  # not supported
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
             async with send_stream:
@@ -82,7 +86,7 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         self,
         topic: str,
         body: bytes,
-        **kwargs: Any,
+        **_: Any,
     ) -> None:
         await self.redis.publish(topic, body)
 
@@ -90,6 +94,10 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         pass
 
     async def nack(
-        self, raw_message: RedisRawMessage, delay: int | None = None
+        self,
+        raw_message: RedisRawMessage,
+        delay: int | None = None,
     ) -> None:
+        if delay is not None:
+            self.logger.warning("delay is not supported expected None got %d", delay)
         await self.redis.publish(raw_message["channel"], raw_message["data"])

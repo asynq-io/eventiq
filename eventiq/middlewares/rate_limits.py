@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from eventiq.middleware import CloudEventType, Middleware
 
@@ -25,9 +25,12 @@ class RateLimitMiddleware(Middleware[CloudEventType]):
         self.limiter = limiter
 
     async def before_process_message(
-        self, *, consumer: Consumer, message: CloudEventType
+        self,
+        *,
+        consumer: Consumer,
+        **_: Any,
     ) -> None:
-        limiter: Limiter = consumer.options.get("limiter", self.limiter)
+        limiter: Limiter | None = consumer.options.get("limiter", self.limiter)
 
         if limiter is not None:
             await limiter.acquire()

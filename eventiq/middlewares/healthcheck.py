@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,7 +18,7 @@ class HealthCheckMiddleware(Middleware):
         self,
         service: Service,
         interval: int = 5,
-        base_dir: str = "/tmp",  # nosec
+        base_dir: str = tempfile.gettempdir(),
     ) -> None:
         super().__init__(service)
         self.base_dir = Path(base_dir)

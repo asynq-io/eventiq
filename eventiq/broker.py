@@ -81,6 +81,7 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
         return type(self).__name__
 
     def should_nack(self, raw_message: Message) -> bool:
+        _ = raw_message
         return False
 
     def format_topic(self, topic: str) -> str:
@@ -131,7 +132,11 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
                 tg.start_soon(self._publish_task, message_topic, body, headers, kwargs)
 
     async def _publish_task(
-        self, topic: str, body: bytes, headers: dict[str, str], kwargs: dict[str, Any]
+        self,
+        topic: str,
+        body: bytes,
+        headers: dict[str, str],
+        kwargs: dict[str, Any],
     ) -> None:
         await self.publish(topic, body, headers=headers, **kwargs)
 
@@ -165,7 +170,9 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
 
     @classmethod
     def from_settings(
-        cls, settings: BrokerSettings | None = None, **kwargs: Any
+        cls,
+        settings: BrokerSettings | None = None,
+        **kwargs: Any,
     ) -> Broker:
         if settings is None:
             settings = cls.Settings()

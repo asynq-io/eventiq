@@ -1,13 +1,9 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "eventiq"
-dynamic = ["version"]
+version = "2.0.0rc"
 description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<4.0"
 license = "Apache-2.0"
 keywords = [
     "python",
@@ -20,18 +16,30 @@ keywords = [
 ]
 authors = [{ name = "RaRhAeu", email = "rarha_eu@protonmail.com" }]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Natural Language :: English",
-    "Framework :: AsyncIO",
     "Operating System :: OS Independent",
-    "Topic :: Software Development :: Libraries",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "anyio>4.0,<5.0",
@@ -46,6 +54,8 @@ Documentation = "https://github.com/asynq-io/eventiq#readme"
 Issues = "https://github.com/asynq-io/eventiq/issues"
 Source = "https://github.com/asynq-io/eventiq"
 
+
+
 [project.scripts]
 eventiq = "eventiq.cli:cli"
 
@@ -54,62 +64,79 @@ nats = ["nats-py"]
 rabbitmq = ["aio-pika"]
 kafka = ["aiokafka"]
 redis = ["redis"]
+msgpack = ["ormsgpack"]
 
-[tool.hatch.version]
-path = "eventiq/__about__.py"
 
-[tool.hatch.envs.default]
-dependencies = [
+[dependency-groups]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "docs"},
+    "ipython",
+    "watchfiles>=1.1.1",
+]
+
+test = [
     "pytest",
-    "pytest-asyncio",
-    "pytest-sugar",
     "pytest-cov",
+    "pytest-sugar",
     "pytest-repeat",
-    "pyyaml",
-    "ruff",
-    "mypy==1.13.0",
-    "bandit",
-    "nats-py",
-    "aiokafka",
-    "aio-pika",
-    "redis",
-    "watchfiles",
+    "pytest-timeout",
 ]
 
-[tool.hatch.envs.default.scripts]
-test = "pytest {args:tests}"
-check = [
-    "ruff check ./eventiq",
-    "ruff format --check ./eventiq",
-    "mypy --install-types --non-interactive {args:eventiq tests}",
-    "bandit -r ./eventiq",
+lint = [
+    "mypy",
+    "ruff",
+    "bandit",
+    "types-pyyaml>=6.0.12.20250915",
 ]
+
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocs-autorefs",
+    "mkdocstrings[python]",
+    "watchdog",
+]
+
+
+[tool.uv.build-backend]
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
 
 [tool.coverage.run]
 source_pkgs = ["eventiq"]
 branch = true
 parallel = true
-omit = ["eventiq/__about__.py"]
 
 [tool.coverage.paths]
 package = ["eventiq"]
 tests = ["tests"]
 
+
 [tool.coverage.report]
-exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
+timeout = 3
 addopts = "--cov=./eventiq"
 testpaths = ["./tests"]
 filterwarnings = "ignore::DeprecationWarning"
 
 [tool.pyright]
-venvPath = ".venv"
-venv = "eventiq"
+venvPath = "."
+venv = ".venv"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
+# strict = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 follow_imports = "normal"
@@ -122,43 +149,31 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 
 line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
 select = ["ALL"]
-
 ignore = [
-    "A001",
     "A002",
-    "A005",
-    "ARG002",
-    "ARG004",
-    "ASYNC109",
     "ANN401",
+    "ASYNC109",
     "B008",     # do not perform function calls in argument defaults
     "BLE001",
     "COM812",
     "D",
     "E501",     # line too long
-    "FA100",
-    "FBT001",
-    "FBT002",
-    "FBT003",
-    "ISC001",
     "N818",
     "PLC0415",
     "PLR0913",
-    "PLR2004",
     "PTH123",
-    "S108",
 ]
 
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "ANN001", "ANN201"]
+"tests/*" = ["S101", "SLF001", "ANN001", "ANN201", "PLR2004", "ARG001", "ARG002", "ARG004"]
 "examples/*" = ["S101", "ANN001", "ANN201", "INP001", "T201"]
 
 [tool.bandit]

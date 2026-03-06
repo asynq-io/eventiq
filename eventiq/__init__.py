@@ -1,9 +1,12 @@
-from .__about__ import __version__
+from importlib.metadata import version
+
 from .broker import Broker
 from .consumer import Consumer, ConsumerGroup, GenericConsumer
 from .middleware import Middleware
 from .models import CloudEvent, Publishes
 from .service import Service
+
+__version__ = version(__name__)
 
 __all__ = [
     "Broker",

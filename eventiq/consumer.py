@@ -6,22 +6,24 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    ClassVar,
+    Concatenate,
     Generic,
     overload,
 )
 from uuid import uuid4
 
 import anyio
-from typing_extensions import Concatenate, Unpack
+from typing_extensions import Unpack
 
+from .context import ServiceContext
 from .dependencies import resolved_func
 from .logging import get_logger
 from .types import CloudEventType, P, RetryStrategy
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from anyio.streams.memory import MemoryObjectSendStream
 
@@ -112,16 +114,21 @@ class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
             extra["description"] = fn.__doc__ or ""
         if not is_async_callable(fn):
             fn = to_async(fn)
-        self.fn = resolved_func(fn)
+        self.fn = resolved_func(fn)  # type: ignore[arg-type]
         super().__init__(**extra)
 
     async def process(
-        self, message: CloudEventType, *args: P.args, **kwargs: P.kwargs
+        self,
+        message: CloudEventType,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> Any:
         return await self.fn(message, *args, **kwargs)
 
 
 class GenericConsumer(Consumer[CloudEventType], ABC):
+    service: ClassVar[ServiceContext] = ServiceContext()
+
     def __init__(self, **extra: Any) -> None:
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)
@@ -130,15 +137,11 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
         if "description" not in extra:
             extra["description"] = type(self).__doc__ or ""
         super().__init__(**extra)
-        self._publish: Publisher | None = None
         self.process = resolved_func(self.process)
 
     @property
     def publish(self) -> Publisher:
-        if self._publish is None:
-            err = "Publisher is not set"
-            raise RuntimeError(err)
-        return self._publish
+        return self.service.publish
 
 
 class ChannelConsumer(Consumer[CloudEventType]):
@@ -179,6 +182,7 @@ class ConsumerGroup:
     def subscribe(
         self,
         func_or_cls: None = None,
+        *,
         name: str | None = None,
         event_type: type[CloudEventType] | None = None,
         topic: str | None = None,
@@ -198,6 +202,7 @@ class ConsumerGroup:
     def subscribe(
         self,
         func_or_cls: MessageHandler | None = None,
+        *,
         name: str | None = None,
         event_type: type[CloudEventType] | None = None,
         topic: str | None = None,
@@ -237,12 +242,13 @@ class ConsumerGroup:
                     "timeout": timeout,
                     "description": description,
                     "encoder": encoder,
+                    "decoder": decoder,
                     "dynamic": dynamic,
                     "tags": tags,
                     "publishes": publishes,
                     "parameters": parameters,
                     "asyncapi_extra": asyncapi_extra,
-                }
+                },
             )
             filtered_options = {k: v for k, v in options.items() if v is not None}
             for k, v in self.options.items():

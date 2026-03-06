@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC
-from typing import TYPE_CHECKING, Annotated, Any, Callable
+from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
 from nats.aio.client import Client
@@ -17,7 +17,7 @@ from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from eventiq.types import ID, DecodedMessage
 
@@ -62,7 +62,8 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
             self.connection_options.setdefault(f"{k}_cb", self._default_cb(k))
 
     def _default_cb(
-        self, message: str
+        self,
+        message: str,
     ) -> Callable[[Exception | None], Awaitable[None]]:
         async def wrapped(error: Exception | None = None) -> None:
             self.logger.warning(message)
@@ -87,7 +88,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
                 ),
                 "messaging.nats.num_delivered": str(raw_message.metadata.num_delivered),
             }
-        except Exception:
+        except AttributeError:
             return {}
 
     async def connect(self) -> None:
@@ -145,7 +146,7 @@ class NatsBroker(AbstractNatsBroker[None]):
         headers: dict[str, str],
         reply: str = "",
         flush: bool = False,
-        **kwargs: Any,
+        **_: Any,
     ) -> None:
         await self.client.publish(topic, body, headers=headers, reply=reply)
         if self._auto_flush or flush:
@@ -161,6 +162,7 @@ class JetStreamBroker(
     :param kwargs: all other options for base classes NatsBroker, Broker.
     """
 
+    _DEFAULT_MAX_RETRIES = 3
     Settings = JetStreamSettings
 
     def __init__(
@@ -182,12 +184,16 @@ class JetStreamBroker(
         message_id: ID,
         timeout: float | None = None,
         stream: str | None = None,
-        **kwargs: Any,
+        **_: Any,
     ) -> api.PubAck:
         if "Nats-Msg-Id" not in headers:
             headers["Nats-Msg-Id"] = str(message_id)
         response = await self.js.publish(
-            topic, payload=body, timeout=timeout, stream=stream, headers=headers
+            topic,
+            payload=body,
+            timeout=timeout,
+            stream=stream,
+            headers=headers,
         )
         if self._auto_flush:
             await self.flush()
@@ -222,7 +228,7 @@ class JetStreamBroker(
                 while True:
                     try:
                         batch = consumer.concurrency - len(
-                            send_stream._state.buffer  # noqa: SLF001
+                            send_stream._state.buffer,  # noqa: SLF001
                         )
                         if batch == 0:
                             await asyncio.sleep(0.1)
@@ -243,7 +249,7 @@ class JetStreamBroker(
             self.logger.info("Stopped sender for consumer: %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
-        return raw_message.metadata.num_delivered <= 3
+        return raw_message.metadata.num_delivered <= self._DEFAULT_MAX_RETRIES
 
     def get_num_delivered(self, raw_message: NatsMsg) -> int | None:
         return raw_message.metadata.num_delivered

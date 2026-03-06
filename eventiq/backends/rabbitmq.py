@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Union
+from typing import TYPE_CHECKING, Annotated, Any
 
 import aio_pika
 from aio_pika.abc import (
@@ -34,7 +34,7 @@ class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
 
 
 class RabbitmqBroker(
-    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]]
+    UrlBroker[AbstractIncomingMessage, ConfirmationFrameType | None],
 ):
     """
     RabbitMQ broker implementation, based on `aio_pika` library.
@@ -81,11 +81,14 @@ class RabbitmqBroker(
 
     async def connect(self) -> None:
         self._connection = await aio_pika.connect_robust(
-            self.url, **self.connection_options
+            self.url,
+            **self.connection_options,
         )
         channel = await self.connection.channel()
         self._exchange = await channel.declare_exchange(
-            name=self.exchange_name, type=aio_pika.ExchangeType.TOPIC, durable=True
+            name=self.exchange_name,
+            type=aio_pika.ExchangeType.TOPIC,
+            durable=True,
         )
 
     async def disconnect(self) -> None:
@@ -100,17 +103,21 @@ class RabbitmqBroker(
         return raw_message.body, {k: str(v) for k, v in raw_message.headers.items()}
 
     @staticmethod
-    def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:
+    def get_message_metadata(_raw_message: AbstractIncomingMessage) -> dict[str, str]:
         return {}
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ) -> None:
         channel = await self.connection.channel()
         prefetch_count = consumer.concurrency * 2
         await channel.set_qos(prefetch_count=prefetch_count)
         options: dict[str, Any] = consumer.options.get(
-            "queue_options", self.queue_options
+            "queue_options",
+            self.queue_options,
         )
         is_durable = not consumer.dynamic
         options.setdefault("durable", is_durable)
@@ -147,7 +154,7 @@ class RabbitmqBroker(
         reply_to: str | None = None,
         expiration: DateType | None = None,
         user_id: str | None = None,
-        **kwargs: Any,
+        **_: Any,
     ) -> ConfirmationFrameType | None:
         msg = aio_pika.Message(
             body,
@@ -177,6 +184,10 @@ class RabbitmqBroker(
         await raw_message.ack()
 
     async def nack(
-        self, raw_message: AbstractIncomingMessage, delay: int | None = None
+        self,
+        raw_message: AbstractIncomingMessage,
+        delay: int | None = None,
     ) -> None:
+        if delay is not None:
+            self.logger.warning("delay is not supported expected None got %d", delay)
         await raw_message.reject(requeue=True)

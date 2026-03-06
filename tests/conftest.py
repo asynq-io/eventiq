@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager, suppress
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import pytest_asyncio
 
 from eventiq import CloudEvent, Consumer, GenericConsumer, Service
 from eventiq.backends.stub import StubBroker
 from eventiq.consumer import FnConsumer
+from eventiq.context import set_current_service
 from eventiq.middleware import Middleware
 from eventiq.middlewares.dlx import DeadLetterQueueMiddleware
 from eventiq.middlewares.error import ErrorHandlerMiddleware
@@ -19,11 +19,9 @@ from eventiq.middlewares.retries import RetryMiddleware
 from eventiq.utils import utc_now
 
 
-@pytest_asyncio.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.stop()
+@pytest.fixture(autouse=True, scope="session")
+def anyio_backend():
+    return "asyncio"
 
 
 @pytest.fixture(scope="session")
@@ -49,7 +47,9 @@ def service(broker, middleware):
     svc.add_middleware(ErrorHandlerMiddleware, callback=AsyncMock())
     svc.add_middleware(PerfCounterMiddleware)
     svc.add_middleware(RateLimitMiddleware)
-    return svc
+    set_current_service(svc)
+    yield svc
+    set_current_service(None)
 
 
 @pytest.fixture(scope="session")
@@ -91,7 +91,7 @@ def ce() -> CloudEvent:
         type="TestEvent",
         topic="test_topic",
     )
-    ce_.set_context(None, {})
+    ce_.set_raw(None, {})
     return ce_
 
 
@@ -115,10 +115,12 @@ async def service_context(service) -> AsyncIterator[None]:
         await task
 
 
-@pytest_asyncio.fixture()
+@pytest.fixture
 async def running_service(service: Service, mock_consumer) -> AsyncGenerator:
     consumer: Consumer = FnConsumer(
-        fn=mock_consumer, event_type=CloudEvent, topic="test_topic"
+        fn=mock_consumer,
+        event_type=CloudEvent,
+        topic="test_topic",
     )
     service.consumer_group.add_consumer(consumer)
 

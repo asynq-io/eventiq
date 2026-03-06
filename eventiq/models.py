@@ -1,6 +1,6 @@
 import contextlib
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Optional, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -13,11 +13,9 @@ from pydantic import (
 from pydantic.fields import FieldInfo, _FieldInfoInputs
 from typing_extensions import Self
 
+from .context import ServiceContext
 from .types import Encoder, Parameter
 from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
-
-if TYPE_CHECKING:
-    from .service import Service
 
 D = TypeVar("D", bound=Any)
 
@@ -31,11 +29,10 @@ class CloudEvent(BaseModel, Generic[D]):
         extra="allow",
         arbitrary_types_allowed=True,
     )
-
-    service: ClassVar["Service"]
+    service: ClassVar[ServiceContext] = ServiceContext()
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
-    content_type: Optional[str] = Field(
+    content_type: str | None = Field(
         None,
         alias="datacontenttype",
         description="Message content type",
@@ -48,17 +45,18 @@ class CloudEvent(BaseModel, Generic[D]):
         description="Message subject (topic)",
     )
     type: str = Field("", description="Event type")
-    source: Optional[str] = Field(None, description="Event source (app)")
+    source: str | None = Field(None, description="Event source (app)")
     data: D = Field(description="Event payload")
-    dataschema: Optional[str] = Field(None, description="Data schema URI")
+    dataschema: str | None = Field(None, description="Data schema URI")
 
-    _raw: Optional[Any] = PrivateAttr(None)
+    _raw: Any | None = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
 
     def __init_subclass__(
         cls,
+        *,
         abstract: bool = False,
-        topic: Optional[str] = None,
+        topic: str | None = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -107,12 +105,12 @@ class CloudEvent(BaseModel, Generic[D]):
         if not self.type:
             self.type = type(self).__name__
         if self.source is None:
-            with contextlib.suppress(AttributeError):
+            with contextlib.suppress(AttributeError, RuntimeError):
                 self.source = self.service.name
         return self
 
     @classmethod
-    def get_default_topic(cls) -> Optional[str]:
+    def get_default_topic(cls) -> str | None:
         return cls.model_fields["topic"].get_default()
 
     @property
@@ -122,16 +120,17 @@ class CloudEvent(BaseModel, Generic[D]):
             raise ValueError(msg)
         return self._raw
 
-    def set_context(self, raw: Any, headers: dict[str, str]) -> None:
+    def set_raw(self, raw: Any, headers: dict[str, str]) -> None:
         self._raw = raw
         self._headers = headers
 
-    def model_dump(self, by_alias: bool = True, **kwargs: Any) -> dict[str, Any]:
-        return super().model_dump(by_alias=by_alias, **kwargs)
-
     @classmethod
     def new(
-        cls, data: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
+        cls,
+        data: D,
+        *,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
     ) -> Self:
         self = cls(data=data, **kwargs)
         if headers:
@@ -148,13 +147,17 @@ class CloudEvent(BaseModel, Generic[D]):
 
     async def publish(
         self,
-        topic: Optional[str] = None,
-        headers: Optional[dict[str, Any]] = None,
-        encoder: Optional[Encoder] = None,
+        topic: str | None = None,
+        headers: dict[str, Any] | None = None,
+        encoder: Encoder | None = None,
         **kwargs: Any,
     ) -> Any:
         return await self.service.publish(
-            self, topic=topic, headers=headers, encoder=encoder, **kwargs
+            self,
+            topic=topic,
+            headers=headers,
+            encoder=encoder,
+            **kwargs,
         )
 
     @classmethod
@@ -162,12 +165,12 @@ class CloudEvent(BaseModel, Generic[D]):
         cls,
         data: D,
         *,
-        headers: Optional[dict[str, str]] = None,
-        publish_options: Optional[dict[str, Any]] = None,
+        headers: dict[str, str] | None = None,
+        publish_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Self:
         self = cls.new(data, headers=headers, **kwargs)
-        await cls.service.publish(self, **(publish_options or {}))
+        await self.publish(**(publish_options or {}))
         return self
 
 

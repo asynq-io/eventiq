@@ -3,8 +3,9 @@ from __future__ import annotations
 import functools
 import os
 import signal
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
+from typing import TYPE_CHECKING, Any, ClassVar, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream, from_thread
@@ -12,8 +13,8 @@ from pydantic import ValidationError
 
 from .broker import Broker, BulkMessage, R
 from .consumer import ChannelConsumer, Consumer, ConsumerGroup
-from .decoder import DEFAULT_DECODER
-from .encoder import DEFAULT_ENCODER
+from .context import set_current_service
+from .encoders import DEFAULT_DECODER, DEFAULT_ENCODER
 from .exceptions import ConsumerCancelledError, DecodeError, Fail, Retry, Skip
 from .logging import LoggerMixin
 from .models import CloudEvent, Publishes
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from anyio.abc import TaskGroup
     from anyio.streams.memory import MemoryObjectReceiveStream
 
-    from .middleware import Middleware
+    from .middleware import MiddlewareProtocol
 
 
 @asynccontextmanager
@@ -84,7 +85,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         self.tags_metadata = tags_metadata or []
         self.consumer_group = ConsumerGroup()
         self.subscribe = self.consumer_group.subscribe
-        self.middlewares: list[Middleware] = []
+        self.middlewares: list[MiddlewareProtocol] = []
         for m in self.default_middlewares:
             self.add_middleware(m)
         self.lifespan = lifespan
@@ -96,10 +97,12 @@ class Service(LoggerMixin, Generic[Message, R]):
         self.handle_message_finalization_delay = handle_message_finalization_delay
         self.options = options
         self.default_action = getattr(self, self.broker.default_on_exc)
-        CloudEvent.service = self
 
     def add_middleware(
-        self, middleware: MiddlewareType[P], *args: P.args, **kwargs: P.kwargs
+        self,
+        middleware: MiddlewareType[P],
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> None:
         self.middlewares.append(middleware(self, *args, **kwargs))
 
@@ -121,8 +124,10 @@ class Service(LoggerMixin, Generic[Message, R]):
     ) -> R:
         if isinstance(type, str):
             kwargs["type"] = type
-            type = CloudEvent
-        ce = type.new(data, type=type, source=self.name, headers=headers, **kwargs)
+            event_cls = CloudEvent
+        else:
+            event_cls = type
+        ce = event_cls.new(data, source=self.name, headers=headers, **kwargs)
         if headers:
             ce.headers.update(headers)
         return await self.publish(ce, encoder=encoder)
@@ -147,7 +152,9 @@ class Service(LoggerMixin, Generic[Message, R]):
         message_kwargs = {
             f"message_{k}": v
             for k, v in message.model_dump(
-                exclude_none=True, by_alias=False, exclude={"topic", "data"}
+                exclude_none=True,
+                by_alias=False,
+                exclude={"topic", "data"},
             ).items()
         }
         message_kwargs.update(kwargs)
@@ -181,10 +188,17 @@ class Service(LoggerMixin, Generic[Message, R]):
     ) -> R:
         await self.dispatch_before("publish", message=message, **kwargs)
         message_topic, body, message_kwargs = self.prepare_message(
-            message, topic, encoder, headers=headers, **kwargs
+            message,
+            topic,
+            encoder,
+            headers=headers,
+            **kwargs,
         )
         res = await self.broker.publish(
-            message_topic, body, headers=message.headers, **message_kwargs
+            message_topic,
+            body,
+            headers=message.headers,
+            **message_kwargs,
         )
         await self.dispatch_after("publish", message=message, **kwargs)
         return res
@@ -200,6 +214,7 @@ class Service(LoggerMixin, Generic[Message, R]):
     ) -> None:
         fn = functools.partial(
             self.bulk_publish,
+            messages,
             topic=topic,
             headers=headers,
             encoder=encoder,
@@ -220,7 +235,11 @@ class Service(LoggerMixin, Generic[Message, R]):
         for message in messages:
             await self.dispatch_before("publish", message=message, **kwargs)
             message_topic, body, message_kwargs = self.prepare_message(
-                message, topic, encoder, headers=headers, **kwargs
+                message,
+                topic,
+                encoder,
+                headers=headers,
+                **kwargs,
             )
             msg = BulkMessage(message_topic, body, message.headers, message_kwargs)
             bulk_messages.append(msg)
@@ -259,7 +278,7 @@ class Service(LoggerMixin, Generic[Message, R]):
                 )
             await self.dispatch_after("consumer_start", consumer=consumer)
 
-    async def run(self, enable_signal_handler: bool = True) -> None:
+    async def run(self, *, enable_signal_handler: bool = True) -> None:
         async with self.lifespan(self) as state:
             if state:
                 self.state.update(state)
@@ -275,7 +294,9 @@ class Service(LoggerMixin, Generic[Message, R]):
                     await self.disconnect()
 
     @asynccontextmanager
-    async def context(self, enable_signal_handler: bool = False) -> AsyncIterator[None]:
+    async def context(
+        self, *, enable_signal_handler: bool = False
+    ) -> AsyncIterator[None]:
         async with self.lifespan(self) as state:
             if state:
                 self.state.update(state)
@@ -368,7 +389,7 @@ class Service(LoggerMixin, Generic[Message, R]):
             consumer=consumer,
             raw_message=message,
         )
-        await self.broker.nack(message, delay=delay)
+        await self.broker.nack(message, delay)
         await self.dispatch_after(
             "nack",
             consumer=consumer,
@@ -384,11 +405,11 @@ class Service(LoggerMixin, Generic[Message, R]):
     ) -> None:
         exc: Exception | None = None
         result = None
-
+        set_current_service(self)
         try:
             data, headers = self.broker.decode_message(raw_message)
             message = decoder.decode(data, consumer.event_type)
-            message.set_context(raw_message, headers)
+            message.set_raw(raw_message, headers)
         except (DecodeError, ValidationError) as e:
             self.logger.exception(
                 "Failed to validate message %s.",
@@ -412,7 +433,9 @@ class Service(LoggerMixin, Generic[Message, R]):
                 message=message,
             )
             self.logger.info(
-                "Running consumer %s with message %s", consumer.name, message.id
+                "Running consumer %s with message %s",
+                consumer.name,
+                message.id,
             )
             with anyio.fail_after(timeout):
                 result = await consumer.process(message)
@@ -527,4 +550,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         async with anyio.create_task_group() as tg, consumer_send, user_receive:
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
             tg.start_soon(self.receiver, consumer, receive_stream)
-            yield user_receive
+            try:
+                yield user_receive
+            finally:
+                tg.cancel_scope.cancel()

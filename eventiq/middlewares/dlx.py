@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from eventiq.middleware import CloudEventType, Middleware
 
 if TYPE_CHECKING:
-    from eventiq import Consumer, Service
+    from eventiq import Service
     from eventiq.exceptions import Fail
 
 
@@ -23,14 +23,14 @@ class DeadLetterQueueMiddleware(Middleware[CloudEventType]):
     async def after_fail_message(
         self,
         *,
-        consumer: Consumer,
         message: CloudEventType,
         exc: Fail,
+        **_: Any,
     ) -> None:
-        dlx_message = message.copy()
+        dlx_message = message.model_copy()
         dlx_message.headers.update(
             {
                 "exc-reason": exc.reason,
-            }
+            },
         )
         await self.service.publish(dlx_message, topic=self.topic, **self.kwargs)

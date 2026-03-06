@@ -1,11 +1,12 @@
 
-name: Publish
-
+name: docs
 on:
-  release:
-    types:
-      - created
+  push:
+    branches:
+      - main
 
+permissions:
+  contents: write
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -14,7 +15,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.13"
       - name: Install dependencies
         run: pipx install hatch
       - name: Build
@@ -22,5 +27,6 @@ jobs:
       - name: Publish
         uses: pypa/gh-action-pypi-publish@v1.13.0
         with:
-          password: ${{ secrets.PYPI_TOKEN }}
-
+          key: ${{ github.ref }}
+          path: .cache
+      - run: uv run mkdocs gh-deploy --force

@@ -116,12 +116,15 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
             await subscriber.commit(
                 {
                     TopicPartition(
-                        raw_message.topic, raw_message.partition
-                    ): raw_message.offset + 1
-                }
+                        raw_message.topic,
+                        raw_message.partition,
+                    ): raw_message.offset + 1,
+                },
             )
 
     async def nack(self, raw_message: ConsumerRecord, delay: int | None = None) -> None:
+        if delay is not None:
+            self.logger.warning("delay is not supported expected None got %d", delay)
         self._subcsribers.pop(id(raw_message), None)
 
     async def disconnect(self) -> None:
@@ -137,7 +140,8 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
     async def connect(self) -> None:
         if self._publisher is None:
             _publisher = AIOKafkaProducer(
-                bootstrap_servers=self.url, **self.connection_options
+                bootstrap_servers=self.url,
+                **self.connection_options,
             )
             self._publisher = _publisher
             await _publisher.start()
@@ -152,7 +156,7 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         message_time: datetime,
         timestamp_ms: int | None = None,
         partition: int | None = None,
-        **kwargs: Any,
+        **_: Any,
     ) -> None:
         if timestamp_ms is None:
             timestamp_ms = int(message_time.timestamp() * 1000)
