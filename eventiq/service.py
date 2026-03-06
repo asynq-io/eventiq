@@ -33,6 +33,10 @@ DEFAULT_MIDDLEWARE_TIMEOUT: int = int(
     os.getenv("EVENTIQ_DEFAULT_MIDDLEWARE_TIMEOUT", "10")
 )
 
+DEFAULT_HANDLE_MESSAGE_FINALIZATION_DELAY: int = int(
+    os.getenv("EVENTIQ_HANDLE_MESSAGE_FINALIZATION_DELAY", "60")
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
@@ -67,6 +71,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         async_api_extra: dict[str, Any] | None = None,
         state: dict[type | str, Any] | None = None,
         middleware_timeout: int = DEFAULT_MIDDLEWARE_TIMEOUT,
+        handle_message_finalization_delay: int = DEFAULT_HANDLE_MESSAGE_FINALIZATION_DELAY,
         **options: Any,
     ) -> None:
         self.broker = broker
@@ -88,6 +93,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         self.state = state or {}
         self.state[Publisher] = self.publish
         self.middleware_timeout = middleware_timeout
+        self.handle_message_finalization_delay = handle_message_finalization_delay
         self.options = options
         self.default_action = getattr(self, self.broker.default_on_exc)
 
@@ -419,7 +425,27 @@ class Service(LoggerMixin, Generic[Message, R]):
             exc.__cause__ = e
             raise
         finally:
+            await self._handle_message_finalization_with_fallback(
+                consumer, message, result, exc
+            )
+
+    async def _handle_message_finalization_with_fallback(
+        self,
+        consumer: Consumer,
+        message: CloudEvent,
+        result: Any,
+        exc: Exception | None,
+    ) -> None:
+        try:
             await self._handle_message_finalization(consumer, message, result, exc)
+        except (Exception, anyio.get_cancelled_exc_class()):
+            self.logger.exception("Error handling message finalization.")
+            with anyio.CancelScope(shield=True):
+                await self.nack(
+                    consumer,
+                    message.raw,
+                    delay=self.handle_message_finalization_delay,
+                )
 
     async def _handle_message_finalization(
         self,
