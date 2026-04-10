@@ -31,7 +31,7 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
     ) -> None:
         self._receive_registry[(consumer.name, message.id)] = perf_counter()
 
-    async def after_process_message(
+    async def after_message_finalization(
         self,
         *,
         consumer: Consumer,
