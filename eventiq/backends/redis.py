@@ -6,7 +6,6 @@ from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker, UrlBrokerSettings
-from eventiq.results import ResultBackend
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
@@ -27,9 +26,7 @@ class RMessage(TypedDict):
 RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 
-class RedisBroker(
-    UrlBroker[RedisRawMessage, None], ResultBackend[RedisRawMessage, None]
-):
+class RedisBroker(UrlBroker[RedisRawMessage, None]):
     """
     Broker implementation based on redis PUB/SUB and aioredis package
     :param kwargs: base class arguments
@@ -88,12 +85,6 @@ class RedisBroker(
         **kwargs: Any,
     ) -> None:
         await self.redis.publish(topic, body)
-
-    async def store_result(self, key: str, result: bytes) -> None:
-        await self.redis.set(key, result)
-
-    async def get_result(self, key: str) -> Any | None:
-        return await self.redis.get(key)
 
     async def ack(self, raw_message: RedisRawMessage) -> None:
         pass

@@ -37,7 +37,7 @@ DecodedMessage = tuple[bytes, Optional[dict[str, str]]]
 T = TypeVar("T", bound=BaseModel)
 Seconds = Union[int, float]
 Timeout = Union[Seconds, timedelta]
-RawData = Union[str, bytes, bytearray]
+RawData = Union[str, bytes]
 
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 AnyType: TypeAdapter = TypeAdapter(Any)

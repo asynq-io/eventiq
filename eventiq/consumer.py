@@ -88,9 +88,6 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.options = options
         self.logger = get_logger(__name__, self.name)
 
-    def maybe_set_publisher(self, publisher: Publisher) -> None:
-        pass
-
     if TYPE_CHECKING:
         process: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
     else:
@@ -135,9 +132,6 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
         super().__init__(**extra)
         self._publish: Publisher | None = None
         self.process = resolved_func(self.process)
-
-    def maybe_set_publisher(self, publisher: Publisher) -> None:
-        self._publish = publisher
 
     @property
     def publish(self) -> Publisher:
