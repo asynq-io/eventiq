@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
 
-from pydantic import AnyUrl, UrlConstraints
+from pydantic import AnyUrl, NonNegativeFloat, UrlConstraints
 from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker, UrlBrokerSettings
@@ -27,15 +28,21 @@ class RMessage(TypedDict):
 RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 
+class RedisSettings(UrlBrokerSettings[RedisUrl]):
+    poll_interval: NonNegativeFloat = 0.0
+
+
 class RedisBroker(
     UrlBroker[RedisRawMessage, None], ResultBackend[RedisRawMessage, None]
 ):
     """
     Broker implementation based on redis PUB/SUB and aioredis package
+    :param poll_interval: delay (in seconds) between consecutive get_message calls
+        in the sender loop.
     :param kwargs: base class arguments
     """
 
-    Settings = UrlBrokerSettings[RedisUrl]
+    Settings = RedisSettings
     protocol = "redis"
 
     WILDCARD_ONE = "*"
@@ -43,9 +50,12 @@ class RedisBroker(
 
     def __init__(
         self,
+        *,
+        poll_interval: float = 0.0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        self.poll_interval = poll_interval
         self._redis: Redis | None = None
 
     @staticmethod
@@ -67,6 +77,7 @@ class RedisBroker(
     async def sender(
         self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
     ) -> None:
+        poll_interval = consumer.options.get("poll_interval", self.poll_interval)
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(consumer.topic)
             async with send_stream:
@@ -74,6 +85,7 @@ class RedisBroker(
                     message = await sub.get_message(ignore_subscribe_messages=True)
                     if message:
                         await send_stream.send(message)
+                    await asyncio.sleep(poll_interval)
 
     async def disconnect(self) -> None:
         await self.redis.close()
