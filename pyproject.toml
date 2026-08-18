@@ -99,6 +99,15 @@ test = [
     "pytest-timeout",
     "structlog",
     "modern-di>=3.3,<4",
+    "pyyaml",
+    "ruff==0.9.4",
+    "mypy==1.13.0",
+    "bandit",
+    "nats-py",
+    "aiokafka",
+    "aio-pika",
+    "redis",
+    "watchfiles",
 ]
 
 lint = [

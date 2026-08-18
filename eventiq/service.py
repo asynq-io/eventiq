@@ -657,6 +657,15 @@ class Service(LoggerMixin, Generic[Message, R]):
                     delay=self.handle_message_finalization_delay,
                 )
             raise
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self.dispatch_after(
+                    "message_finalized",
+                    consumer=consumer,
+                    message=message,
+                    result=result,
+                    exc=exc,
+                )
 
     async def _handle_message_finalization(
         self,

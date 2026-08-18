@@ -139,6 +139,16 @@ class MiddlewareProtocol(Protocol[CloudEventType]):
     ) -> None:
         """Called after message is processed (but not acknowledged/rejected yet)."""
 
+    async def after_message_finalized(
+        self,
+        *,
+        consumer: Consumer,
+        message: CloudEventType,
+        result: Any = None,
+        exc: Exception | None = None,
+    ) -> None:
+        """Called after message finalized (after ack/nack). Use for context cleanup."""
+
     async def encode_payload(
         self,
         payload: bytes,

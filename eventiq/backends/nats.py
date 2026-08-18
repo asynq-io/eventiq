@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -10,7 +11,7 @@ from nats.errors import NotJSMessageError
 from nats.errors import TimeoutError as NatsTimeoutError
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
-from pydantic import AnyUrl, Field, UrlConstraints
+from pydantic import AnyUrl, Field, NonNegativeFloat, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
 from eventiq.settings import UrlBrokerSettings
@@ -32,6 +33,8 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 class JetStreamSettings(NatsSettings):
     jetstream_options: dict[str, Any] = Field({})
+    poll_interval: NonNegativeFloat = 0.0
+    heartbeat: NonNegativeFloat = 0.1
 
 
 if TYPE_CHECKING:
@@ -174,7 +177,11 @@ class JetStreamBroker(
     """NatsBroker with JetStream enabled.
 
     :param jetstream_options: Additional options passed to ``nc.jetstream(...)``.
-    :param kwargs: Options forwarded to the base classes.
+    :param poll_interval: delay (in seconds) between consecutive pull-subscription
+        fetch calls in the sender loop.
+    :param heartbeat: heartbeat interval (in seconds) for pull-subscription fetch
+        calls in the sender loop.
+    :param kwargs: all other options for base classes NatsBroker, Broker.
     """
 
     _DEFAULT_MAX_RETRIES = 3
@@ -190,11 +197,15 @@ class JetStreamBroker(
         self,
         *,
         jetstream_options: dict[str, Any] | None = None,
+        poll_interval: float = 0.0,
+        heartbeat: float = 0.1,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.jetstream_options = jetstream_options or {}
         self.js = JetStreamContext(self.client, **self.jetstream_options)
+        self.poll_interval = poll_interval
+        self.heartbeat = heartbeat
 
     async def publish(
         self,
@@ -237,7 +248,8 @@ class JetStreamBroker(
                 config_kwargs[key] = consumer.options[key]
         config = ConsumerConfig(**config_kwargs)
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
-        heartbeat = consumer.options.get("heartbeat", 0.1)
+        heartbeat = consumer.options.get("heartbeat", self.heartbeat)
+        poll_interval = consumer.options.get("poll_interval", self.poll_interval)
         durable = None if consumer.dynamic else f"{group}:{consumer.name}"
         subscription = await self.js.pull_subscribe(
             subject=self.format_topic(consumer.topic),
@@ -265,6 +277,7 @@ class JetStreamBroker(
                             await send_stream.send(message)
                     except NatsTimeoutError:
                         self.logger.debug("Suppressing nats timeout error")
+                    await asyncio.sleep(poll_interval)
         finally:
             # Shielded: cancellation is level-triggered, so an unshielded await here
             # would be cancelled immediately and leak the ephemeral consumer.

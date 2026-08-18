@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar, cast
 
-from pydantic import AnyUrl, UrlConstraints
+from pydantic import AnyUrl, NonNegativeFloat, UrlConstraints
 from redis.asyncio import Redis
 
 from eventiq.broker import UrlBroker
@@ -33,11 +34,14 @@ RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 class RedisSettings(UrlBrokerSettings[RedisUrl]):
     poll_timeout: int = DEFAULT_POLL_TIMEOUT
+    poll_interval: NonNegativeFloat = 0.0
 
 
 class RedisBroker(UrlBroker[RedisRawMessage, None]):
     """
     Broker implementation based on redis PUB/SUB and aioredis package
+    :param poll_interval: delay (in seconds) between consecutive get_message calls
+        in the sender loop.
     :param kwargs: base class arguments
     """
 
@@ -51,11 +55,13 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         self,
         *,
         poll_timeout: int = DEFAULT_POLL_TIMEOUT,
+        poll_interval: float = 0.0,
         redis: Redis | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.poll_timeout = poll_timeout
+        self.poll_interval = poll_interval
         self._redis: Redis | None = redis or Redis.from_url(
             self.url, **self.connection_options
         )
@@ -89,6 +95,7 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         send_stream: MemoryObjectSendStream,
     ) -> None:
         _ = group  # not supported
+        poll_interval = consumer.options.get("poll_interval", self.poll_interval)
         async with self.redis.pubsub() as sub:
             await sub.psubscribe(self.format_topic(consumer.topic))
             async with send_stream:
@@ -103,6 +110,7 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
                         await send_stream.send(message)
                     else:
                         await sub.ping()
+                    await asyncio.sleep(poll_interval)
 
     async def disconnect(self) -> None:
         if self._redis is None:
