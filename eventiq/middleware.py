@@ -139,6 +139,23 @@ class MiddlewareProtocol(Protocol[CloudEventType]):
     ) -> None:
         """Called after message is processed (but not acknowledged/rejected yet)."""
 
+    async def encode_payload(
+        self,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> tuple[bytes, dict[str, str]]:
+        """Transform encoded payload before broker publish. Returns (payload, headers)."""
+        return payload, headers
+
+    async def decode_payload(
+        self,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> bytes:
+        """Transform raw payload after broker decode, before message decoder. Returns payload."""
+        _ = headers
+        return payload
+
 
 class Middleware(MiddlewareProtocol[CloudEventType], LoggerMixin):
     def __init__(self, service: Service) -> None:

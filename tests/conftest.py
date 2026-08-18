@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from unittest.mock import AsyncMock, MagicMock
 
+import anyio
 import pytest
 
 from eventiq import CloudEvent, Consumer, GenericConsumer, Service
@@ -105,10 +106,22 @@ def mock_consumer():
     return mock
 
 
+async def _wait_for_senders(service) -> None:
+    """Block until every consumer's sender has registered its topic.
+
+    `StubBroker.sender` inserts into `topics` lazily and `publish` only matches
+    topics already present, so publishing before that silently drops the message.
+    """
+    expected = {c.topic for c in service.consumer_group.consumers.values()}
+    with anyio.fail_after(1):
+        while not expected <= service.broker.topics.keys():
+            await anyio.lowlevel.checkpoint()
+
+
 @asynccontextmanager
 async def service_context(service) -> AsyncIterator[None]:
     task = asyncio.create_task(service.run(enable_signal_handler=False))
-    await asyncio.sleep(0)
+    await _wait_for_senders(service)
     yield
     with suppress(asyncio.CancelledError):
         task.cancel()

@@ -28,13 +28,11 @@ if TYPE_CHECKING:
     from .service import Service
 
 
-Undefinded: Any = object()
-
 ID = UUID | str
 
 Message = TypeVar("Message", bound=Any)
 DefaultAction = Literal["ack", "nack"]
-DecodedMessage = tuple[bytes, dict[str, str] | None]
+DecodedMessage = tuple[bytes, dict[str, str]]
 
 T = TypeVar("T", bound=BaseModel)
 Seconds = int | float

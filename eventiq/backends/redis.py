@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar, cast
 
 from pydantic import AnyUrl, UrlConstraints
 from redis.asyncio import Redis
 
-from eventiq.broker import UrlBroker, UrlBrokerSettings
+from eventiq.broker import UrlBroker
+from eventiq.settings import UrlBrokerSettings
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import Consumer
     from eventiq.types import DecodedMessage
 
 RedisUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["redis", "rediss"])]
+
+DEFAULT_POLL_TIMEOUT = 2
 
 
 class RMessage(TypedDict):
@@ -26,13 +31,17 @@ class RMessage(TypedDict):
 RedisRawMessage = TypeVar("RedisRawMessage", bound=RMessage)
 
 
+class RedisSettings(UrlBrokerSettings[RedisUrl]):
+    poll_timeout: int = DEFAULT_POLL_TIMEOUT
+
+
 class RedisBroker(UrlBroker[RedisRawMessage, None]):
     """
     Broker implementation based on redis PUB/SUB and aioredis package
     :param kwargs: base class arguments
     """
 
-    Settings = UrlBrokerSettings[RedisUrl]
+    Settings = RedisSettings
     protocol = "redis"
 
     WILDCARD_ONE = "*"
@@ -40,20 +49,32 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
 
     def __init__(
         self,
+        *,
+        poll_timeout: int = DEFAULT_POLL_TIMEOUT,
+        redis: Redis | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self._redis: Redis | None = None
+        self.poll_timeout = poll_timeout
+        self._redis: Redis | None = redis or Redis.from_url(
+            self.url, **self.connection_options
+        )
 
     @staticmethod
     def decode_message(raw_message: RedisRawMessage) -> DecodedMessage:
-        return raw_message["data"], None
+        return raw_message["data"], {}
 
     @property
     def is_connected(self) -> bool:
-        if self.redis.connection:
-            return self.redis.connection.is_connected
-        return False
+        # A pooled client keeps `.connection` as None even while healthy, and the
+        # `redis` property raises before connect(): report on the client instead.
+        return self._redis is not None
+
+    async def check_health(self) -> bool:
+        if self._redis is None:
+            return False
+        # `ping` is typed for both the sync and async clients.
+        return bool(await cast("Awaitable[bool]", self._redis.ping()))
 
     @property
     def redis(self) -> Redis:
@@ -69,18 +90,28 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
     ) -> None:
         _ = group  # not supported
         async with self.redis.pubsub() as sub:
-            await sub.psubscribe(consumer.topic)
+            await sub.psubscribe(self.format_topic(consumer.topic))
             async with send_stream:
                 while True:
-                    message = await sub.get_message(ignore_subscribe_messages=True)
+                    message = await sub.get_message(
+                        ignore_subscribe_messages=True, timeout=self.poll_timeout
+                    )
                     if message:
+                        if message["type"] == "pong":
+                            self.logger.debug("Received pong from pubsub %s", message)
+                            continue
                         await send_stream.send(message)
+                    else:
+                        await sub.ping()
 
     async def disconnect(self) -> None:
-        await self.redis.close()
+        if self._redis is None:
+            return
+        await self._redis.aclose()
+        self._redis = None
 
     async def connect(self) -> None:
-        self._redis = Redis.from_url(self.url, **self.connection_options)
+        self.redis.ping()
 
     async def publish(
         self,

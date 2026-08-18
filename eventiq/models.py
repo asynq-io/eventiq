@@ -1,4 +1,3 @@
-import contextlib
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Generic, TypeVar
 from uuid import UUID, uuid4
@@ -29,6 +28,7 @@ class CloudEvent(BaseModel, Generic[D]):
         extra="allow",
         arbitrary_types_allowed=True,
     )
+
     service: ClassVar[ServiceContext] = ServiceContext()
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
@@ -60,6 +60,18 @@ class CloudEvent(BaseModel, Generic[D]):
         validate_topic: bool = False,
         **kwargs: Any,
     ) -> None:
+        super().__init_subclass__(**kwargs)
+
+    @classmethod
+    def __pydantic_init_subclass__(
+        cls,
+        *,
+        abstract: bool = False,
+        topic: str | None = None,
+        validate_topic: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
         if not abstract and topic:
             kw: _FieldInfoInputs = {
                 "alias": "subject",
@@ -84,7 +96,7 @@ class CloudEvent(BaseModel, Generic[D]):
                 )
 
             cls.model_fields["topic"] = FieldInfo(**kw)
-        super().__init_subclass__(**kwargs)
+            cls.model_rebuild(force=True)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, CloudEvent):
@@ -104,9 +116,6 @@ class CloudEvent(BaseModel, Generic[D]):
             self.topic = topic
         if not self.type:
             self.type = type(self).__name__
-        if self.source is None:
-            with contextlib.suppress(AttributeError, RuntimeError):
-                self.source = self.service.name
         return self
 
     @classmethod
@@ -191,20 +200,27 @@ class Publishes(BaseModel):
         self.topic = topic
         return self
 
-    model_config = {
-        "populate_by_name": True,
-        "extra": "allow",
-        "arbitrary_types_allowed": True,
-    }
+    model_config = ConfigDict(
+        use_enum_values=True,
+        populate_by_name=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
 
 
 class Event(CloudEvent[D], abstract=True):
-    pass
+    """
+    Semantic convention for messages that represent events
+    """
 
 
 class Command(CloudEvent[D], abstract=True):
-    pass
+    """
+    Semantic convention for messages that represent commands
+    """
 
 
 class Query(CloudEvent[D], abstract=True):
-    pass
+    """
+    Semantic convention for messages that represent queries
+    """

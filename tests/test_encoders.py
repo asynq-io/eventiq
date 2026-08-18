@@ -1,7 +1,12 @@
+from datetime import datetime, timedelta
+from decimal import Decimal
+from ipaddress import IPv4Address
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
+from eventiq import CloudEvent
 from eventiq.encoders import DEFAULT_DECODER, DEFAULT_ENCODER
 from eventiq.encoders.json import JsonDecoder, JsonEncoder
 from eventiq.encoders.msgpack import MsgPackDecoder, MsgPackEncoder
@@ -46,6 +51,18 @@ def test_msgpack_encode_decode_roundtrip(ce):
     assert parsed == ce
 
 
+@pytest.mark.parametrize("strict", [False, True])
+def test_msgpack_roundtrip_preserves_native_types(ce, strict):
+    """The decoder must validate in JSON mode to parse the encoder's own output."""
+    parsed = MsgPackDecoder(strict=strict).decode(
+        MsgPackEncoder().encode(ce), as_type=type(ce)
+    )
+
+    assert isinstance(parsed.id, UUID)
+    assert isinstance(parsed.time, datetime)
+    assert parsed == ce
+
+
 def test_msgpack_encode_error():
     encoder = MsgPackEncoder()
     model = MagicMock()
@@ -76,6 +93,30 @@ def test_msgpack_decode_error():
     decoder = MsgPackDecoder()
     with pytest.raises(DecodeError):
         decoder.decode(b"\xc1")  # reserved byte → invalid msgpack
+
+
+def test_msgpack_encode_non_native_types():
+    """Payload types msgpack cannot represent must be serialized in json mode."""
+    ce = CloudEvent.new(
+        {
+            "amount": Decimal("1.5"),
+            "ttl": timedelta(seconds=30),
+            "tags": {"a"},
+            "ip": IPv4Address("127.0.0.1"),
+        },
+        type="TestEvent",
+        topic="test_topic",
+    )
+    ce.set_raw(None, {})
+
+    data = MsgPackEncoder().encode(ce)
+
+    assert MsgPackDecoder().decode(data)["data"] == {
+        "amount": "1.5",
+        "ttl": "PT30S",
+        "tags": ["a"],
+        "ip": "127.0.0.1",
+    }
 
 
 def test_msgpack_content_type():

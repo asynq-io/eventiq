@@ -107,3 +107,13 @@ def test_imported_type_schema_bare():
     from eventiq import CloudEvent
 
     assert m.handler is CloudEvent
+
+
+# --- path format validation ---
+
+
+@pytest.mark.parametrize("path", ["eventiq", "eventiq.models", "eventiq:"])
+def test_import_from_string_requires_module_attribute_separator(path):
+    """Dot-notation or a missing attribute must explain the expected format."""
+    with pytest.raises(ImportError, match="module:attribute"):
+        import_from_string(path)

@@ -65,12 +65,36 @@ pip install 'eventiq[broker]'
 - Twelve factor app approach - stdout logging, configuration through environment variables
 - Easily extensible via Middlewares
 - Multiple extensions and integrations including:
-  - Prometheus - mertics exporter
-  - OpenTelemetry - tracing and metrics
-  - Message Pack - message pack encoder for messages
-  - FastAPI - integrating eventiq Service with FastAPI applications (WIP)
-  - Dataref - data reference resolver for messages (WIP)
-  - Eventiq Workflows - orchestration engine built on top of eventiq (WIP)
+
+### Prometheus metrics exporter
+
+Source: https://github.com/asynq-io/eventiq-exporter
+
+Installation:
+```shell
+uv add eventiq-exporter
+# or
+pip install eventiq-exporter
+```
+
+### OpenTelemetry instrumentation
+Source: https://github.com/asynq-io/opentelemetry-instrumentation-eventiq
+
+Installation:
+```shell
+uv add opentelemetry-instrumentation-eventiq
+# or
+pip install opentelemetry-instrumentation-eventiq
+```
+
+### FastAPI integration
+ Source: https://github.com/asynq-io/eventiq-fastapi
+Installation
+```shell
+pip install eventiq-fastapi
+# or
+pip install eventiq-fastapi
+```
 
 ## Basic Usage
 

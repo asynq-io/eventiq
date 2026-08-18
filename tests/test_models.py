@@ -1,7 +1,14 @@
+import inspect
+
 import pytest
 from pydantic import ValidationError
 
 from eventiq import CloudEvent
+from eventiq.context import (
+    ServiceContext,
+    reset_current_service,
+    set_current_service,
+)
 from eventiq.models import Command, Event, Publishes, Query
 
 
@@ -113,15 +120,48 @@ def test_requires_topic():
         CloudEvent(data="x", type="Test")
 
 
-def test_source_set_from_service(service):
-    from eventiq.context import set_current_service
-
+def test_source_not_set_by_validation(service):
+    """Validation must leave source alone: it also runs when decoding inbound messages."""
     set_current_service(service)
     try:
         ce2 = CloudEvent.new({"x": 1}, type="Test", topic="t")
-        assert ce2.source == service.name
+        assert ce2.source is None
     finally:
         set_current_service(None)
+
+
+def test_decoding_does_not_stamp_missing_source(service):
+    """A foreign message without a source must not claim to originate here."""
+    decoded = service.decoder.decode(
+        b'{"data": {"x": 1}, "type": "Test", "subject": "t"}', CloudEvent
+    )
+    assert decoded.source is None
+
+
+def test_decoding_keeps_foreign_source(service):
+    decoded = service.decoder.decode(
+        b'{"data": {"x": 1}, "type": "Test", "subject": "t", "source": "other_service"}',
+        CloudEvent,
+    )
+    assert decoded.source == "other_service"
+
+
+@pytest.mark.parametrize("ambient", [False, True])
+def test_class_level_service_access_does_not_raise(service, ambient):
+    """help(), inspect.getmembers and doc tooling read `service` off plain classes."""
+
+    class ImportTimeEvent(CloudEvent[dict], topic="import.topic"): ...
+
+    token = set_current_service(service if ambient else None)
+    try:
+        assert isinstance(ImportTimeEvent.service, ServiceContext)
+        assert "service" in dict(inspect.getmembers(ImportTimeEvent))
+    finally:
+        reset_current_service(token)
+
+
+def test_instance_service_access_resolves_ambient_service(service, ce):
+    assert ce.service is service
 
 
 def test_abstract_subclasses():
@@ -137,6 +177,22 @@ def test_abstract_subclasses():
     assert MyEvent(data="hello").topic == "my.topic"
     assert MyCommand(data={}).type == "MyCommand"
     assert MyQuery(data="?").topic == "my.query"
+
+
+def test_topic_not_leaked_between_siblings_of_same_parametrization():
+    """Siblings share the cached `Event[dict]` base; `topic=` must not leak into it."""
+
+    class SiblingWithTopic(Event[dict], topic="siblings.with_topic"): ...
+
+    class SiblingWithoutTopic(Event[dict]): ...
+
+    assert SiblingWithTopic.get_default_topic() == "siblings.with_topic"
+    assert SiblingWithoutTopic.get_default_topic() == ""
+
+    assert SiblingWithoutTopic(data={}, topic="anything.else").topic == "anything.else"
+
+    with pytest.raises(ValidationError):
+        SiblingWithTopic(data={}, topic="anything.else")
 
 
 def test_publishes_requires_topic():

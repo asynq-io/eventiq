@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import ormsgpack
+from pydantic_core import to_json
 from typing_extensions import Unpack
 
 from eventiq.exceptions import DecodeError, EncodeError
@@ -14,31 +15,36 @@ if TYPE_CHECKING:
 
 
 class MsgPackEncoder:
-    CONTENT_TYPE = "application/x-msgpack"
+    """Encodes messages as MessagePack."""
+
+    CONTENT_TYPE: str = "application/x-msgpack"
 
     def __init__(
-        self, option: int | None = None, **options: Unpack[EncodeOptions]
+        self, *, option: int | None = None, **options: Unpack[EncodeOptions]
     ) -> None:
         self.option = option
-        self.options = options
+        # CloudEvents-spec keys on the wire, like the default `JsonEncoder`: field
+        # names would emit `topic`/`content_type` instead of `subject`/`datacontenttype`.
+        self.options: EncodeOptions = {"by_alias": True, **options}
 
     def encode(self, data: BaseModel) -> bytes:
         try:
-            return ormsgpack.packb(data.model_dump(**self.options), option=self.option)
-        except ormsgpack.MsgpackEncodeError as e:
+            return ormsgpack.packb(
+                data.model_dump(mode="json", **self.options), option=self.option
+            )
+        except Exception as e:
             raise EncodeError from e
 
 
 class MsgPackDecoder:
+    """Decodes MessagePack payloads into events."""
+
+    CONTENT_TYPE: str = "application/x-msgpack"
+
     def __init__(
-        self,
-        *,
-        option: int | None = None,
-        from_attributes: bool | None = None,
-        **options: Unpack[DecodeOptions],
+        self, *, option: int | None = None, **options: Unpack[DecodeOptions]
     ) -> None:
         self.option = option
-        self.from_attributes = from_attributes
         self.options = options
 
     def decode(self, data: RawData, as_type: type[T] | None = None) -> T | Any:
@@ -48,8 +54,8 @@ class MsgPackDecoder:
             unpacked = ormsgpack.unpackb(data, option=self.option)
             if as_type is None:
                 return unpacked
-            return as_type.model_validate(
-                unpacked, from_attributes=self.from_attributes, **self.options
-            )
+            # `MsgPackEncoder` packs `mode="json"` output and msgpack has no native
+            # UUID/datetime types, so validation must happen in JSON mode.
+            return as_type.model_validate_json(to_json(unpacked), **self.options)
         except Exception as e:
             raise DecodeError from e

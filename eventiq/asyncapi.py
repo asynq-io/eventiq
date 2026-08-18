@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Literal
@@ -36,13 +35,33 @@ if TYPE_CHECKING:
     from eventiq.types import Parameter as ParamDict
 
 
-def save_async_api_to_file(spec: BaseModel, path: Path, fmt: str) -> None:
-    data = spec.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+def save_async_api_to_file(
+    spec: BaseModel, path: Path, fmt: Literal["json", "yaml"]
+) -> None:
+    """Write `spec` to `path`, as JSON or YAML."""
+    if fmt not in ("json", "yaml"):
+        msg = f"Unsupported format {fmt!r}, expected 'json' or 'yaml'"
+        raise ValueError(msg)
+    # Import before opening `path`: opening it for writing truncates it, so a
+    # missing extra would destroy a previously generated spec.
+    if fmt == "yaml":
+        try:
+            import yaml
+        except ImportError as e:
+            msg = (
+                "YAML output requires PyYAML. Install it with "
+                "'pip install eventiq[yaml]' or 'pip install pyyaml'."
+            )
+            raise ImportError(msg) from e
+
+    # JSON mode: every model allows extra fields, so user-supplied `asyncapi_extra`
+    # may hold values (datetimes, enums) neither json nor yaml can dump natively.
+    data = spec.model_dump(
+        mode="json", by_alias=True, exclude_none=True, exclude_unset=True
+    )
 
     with open(path, "w") as f:
         if fmt == "yaml":
-            import yaml
-
             yaml.dump(data, f)
         else:
             json.dump(data, f)
@@ -119,25 +138,29 @@ def generate_receive_operation(
         payload=Reference(ref=f"#/components/schemas/{event_type}"),
         **consumer.asyncapi_extra.get("message", {}),
     )
-    if spec.components is None:
-        spec.components = Components()
-    if spec.components.messages is None:
-        spec.components.messages = {}
-    spec.components.messages[event_type] = message
+    register_component_message(spec, event_type, message, overwrite=True)
 
-    channel = Channel(
-        address=consumer.topic,
-        servers=[Reference(ref=f"#/servers/{service.broker.name}")],
-        messages={
-            event_type: Reference(ref=f"#/channels/{channel_id}/messages/{event_type}"),
-        },
-        parameters=channels_params[channel_id],
-        tags=get_tag_list(tags, consumer.tags),
-        **consumer.asyncapi_extra.get("channel", {}),
-    )
     if spec.channels is None:
         spec.channels = {}
-    spec.channels[channel_id] = channel
+    existing = spec.channels.get(channel_id)
+    if isinstance(existing, Channel):
+        # A send operation may have created this channel already; keep its messages.
+        add_channel_message(existing, event_type)
+        existing.parameters = channels_params[channel_id]
+        add_channel_tags(existing, get_tag_list(tags, consumer.tags))
+        for key, value in consumer.asyncapi_extra.get("channel", {}).items():
+            setattr(existing, key, value)
+    else:
+        spec.channels[channel_id] = Channel(
+            address=consumer.topic,
+            servers=[Reference(ref=f"#/servers/{service.broker.name}")],
+            messages={
+                event_type: Reference(ref=f"#/components/messages/{event_type}"),
+            },
+            parameters=channels_params[channel_id],
+            tags=get_tag_list(tags, consumer.tags),
+            **consumer.asyncapi_extra.get("channel", {}),
+        )
 
     operation_id = f"{to_camel(consumer.name)}Receive"
     operation = Operation(
@@ -150,6 +173,40 @@ def generate_receive_operation(
     if spec.operations is None:
         spec.operations = {}
     spec.operations[operation_id] = operation
+
+
+def register_component_message(
+    spec: AsyncAPI, event_type: str, message: Message, *, overwrite: bool = False
+) -> None:
+    """Store a message under `#/components/messages` so refs to it resolve.
+
+    Consumers describe a message more precisely than a publisher can (content type,
+    docstring), so they overwrite the placeholder a send operation may have left.
+    """
+    if spec.components is None:
+        spec.components = Components()
+    if spec.components.messages is None:
+        spec.components.messages = {}
+    if overwrite:
+        spec.components.messages[event_type] = message
+    else:
+        spec.components.messages.setdefault(event_type, message)
+
+
+def add_channel_tags(channel: Channel, new_tags: list[Tag]) -> None:
+    """Append tags to a channel, skipping names it already carries."""
+    current = channel.tags or []
+    known = {tag.name for tag in current}
+    channel.tags = [*current, *(t for t in new_tags if t.name not in known)]
+
+
+def add_channel_message(channel: Channel, event_type: str) -> None:
+    """Point a channel at a component message without dropping existing ones."""
+    if channel.messages is None:
+        channel.messages = {}
+    channel.messages.setdefault(
+        event_type, Reference(ref=f"#/components/messages/{event_type}")
+    )
 
 
 def generate_send_operation(
@@ -166,6 +223,20 @@ def generate_send_operation(
         for k, v in params.items():
             channels_params[channel_id].setdefault(k, v)
 
+        # A published-only event has no consumer to describe it, so register the
+        # component message here; otherwise the channel ref would dangle.
+        register_component_message(
+            spec,
+            event_type,
+            Message(
+                name=event_type,
+                title=event_type,
+                description=publishes.type.__doc__,
+                payload=Reference(ref=f"#/components/schemas/{event_type}"),
+                **publishes.asyncapi_extra.get("message", {}),
+            ),
+        )
+
         operation_id = f"send{event_type}"
         operation = Operation(
             action="send",
@@ -181,8 +252,11 @@ def generate_send_operation(
         spec.operations[operation_id] = operation
         if spec.channels is None:
             spec.channels = {}
-        if channel_id not in spec.channels:
-            channel = Channel(
+        existing = spec.channels.get(channel_id)
+        if isinstance(existing, Channel):
+            add_channel_message(existing, event_type)
+        else:
+            spec.channels[channel_id] = Channel(
                 address=publishes.topic,
                 servers=[Reference(ref=f"#/servers/{broker.name}")],
                 messages={
@@ -193,7 +267,6 @@ def generate_send_operation(
                 summary=publishes.summary,
                 **publishes.asyncapi_extra.get("channel", {}),
             )
-            spec.channels[channel_id] = channel
 
 
 def populate_spec(service: Service, spec: AsyncAPI) -> None:
@@ -224,8 +297,12 @@ def populate_spec(service: Service, spec: AsyncAPI) -> None:
     )
 
 
-@functools.lru_cache
 def get_async_api_spec(service: Service) -> AsyncAPI:
+    """Build the AsyncAPI document describing `service`.
+
+    Not cached: consumers may be registered after the first call, and caching would
+    keep the service (and its broker) alive for the process lifetime.
+    """
     schemas = get_all_models_schema(service)
     spec = AsyncAPI(
         asyncapi="3.0.0",

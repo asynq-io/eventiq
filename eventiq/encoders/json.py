@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 
 class JsonEncoder:
+    """Encodes messages as JSON."""
+
     CONTENT_TYPE: str = "application/json"
 
     def __init__(
@@ -32,6 +34,8 @@ class JsonEncoder:
 
 
 class JsonDecoder:
+    """Decodes JSON payloads into events."""
+
     CONTENT_TYPE: str = "application/json"
 
     def __init__(self, **options: Unpack[DecodeOptions]) -> None:
@@ -39,7 +43,7 @@ class JsonDecoder:
 
     def decode(self, data: RawData, as_type: type[T] | None = None) -> T | Any:
         try:
-            if as_type:
+            if as_type is not None:
                 return as_type.model_validate_json(data, **self.options)
             return AnyType.validate_json(data, **self.options)
         except Exception as e:

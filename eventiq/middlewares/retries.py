@@ -73,10 +73,11 @@ class BaseRetryStrategy(LoggerMixin, Generic[CloudEventType]):
 
     def maybe_retry(
         self,
-        _service: Service,
+        service: Service,
         message: CloudEventType,
         exc: Exception,
     ) -> None:
+        _ = service
         if not (self.throws and isinstance(exc, self.throws)):
             self.retry(message, exc)
         else:

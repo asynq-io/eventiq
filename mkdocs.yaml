@@ -1,0 +1,48 @@
+site_name: "Eventiq"
+site_description: "Asyncio native pub/sub framework for Python"
+theme:
+  name: "material"
+  palette:
+    - scheme: default
+      primary: cyan
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    - scheme: slate
+      primary: cyan
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+  features:
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+repo_name: asynq-io/eventiq
+repo_url: https://github.com/asynq-io/eventiq
+nav:
+  - "Eventiq": index.md
+  - "Usage": usage.md
+  - "Reference":
+    - "Service": reference/service.md
+    - "Models": reference/models.md
+    - "Broker": reference/broker.md
+    - "Consumer": reference/consumer.md
+    - "Middleware": reference/middleware.md
+    - "Exceptions": reference/exceptions.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_signature_annotations: true
+            docstring_style: sphinx

@@ -12,11 +12,13 @@ if TYPE_CHECKING:
 
 
 class ErrorHandlerMiddleware(Middleware[CloudEventType]):
+    """Invokes `callback` whenever processing fails with one of `errors`."""
+
     def __init__(
         self,
         service: Service,
         callback: Callable[[Service, Consumer, CloudEventType, Exception | None], Any],
-        errors: type[Exception] | tuple[type[Exception]] = Exception,
+        errors: type[Exception] | tuple[type[Exception], ...] = Exception,
     ) -> None:
         super().__init__(service)
         if not is_async_callable(callback):

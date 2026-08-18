@@ -97,6 +97,33 @@ def test_get_safe_url_no_credentials():
     assert url == "nats://localhost:4222"
 
 
+def test_get_safe_url_without_port_keeps_host_intact():
+    url = get_safe_url("amqp://user:s3cr3t@rabbitmq/vhost")
+    assert url == "amqp://user:*****@rabbitmq/vhost"
+    assert "None" not in url
+
+
+def test_get_safe_url_preserves_explicit_port():
+    url = get_safe_url("amqp://user:s3cr3t@rabbitmq:5672/vhost")
+    assert url == "amqp://user:*****@rabbitmq:5672/vhost"
+
+
+def test_get_safe_url_username_only_is_untouched():
+    url = get_safe_url("nats://user@localhost:4222")
+    assert url == "nats://user@localhost:4222"
+
+
+# --- resolve_message_type_hint under PEP 563 ---
+
+
+def test_resolve_message_type_hint_evaluates_postponed_annotations():
+    from .postponed_handlers import PostponedEvent, handler
+
+    resolved = resolve_message_type_hint(handler)
+    assert resolved is PostponedEvent
+    assert not isinstance(resolved, str)
+
+
 # --- is_async_callable ---
 
 
@@ -184,20 +211,61 @@ def test_resolve_message_type_hint_no_hints():
     assert result is None
 
 
+def test_resolve_message_type_hint_no_annotations_at_all():
+    assert resolve_message_type_hint(lambda _msg: None) is None
+
+
+def test_resolve_message_type_hint_reports_unresolvable_annotation():
+    """A TYPE_CHECKING-only annotation must name itself, not look like a missing type."""
+
+    async def handler(message) -> None:
+        pass
+
+    # What `if TYPE_CHECKING: from x import TypeCheckingOnlyEvent` plus postponed
+    # annotations leaves behind: a string no runtime namespace can resolve.
+    handler.__annotations__ = {"message": "TypeCheckingOnlyEvent", "return": None}
+
+    with pytest.raises(TypeError, match="TypeCheckingOnlyEvent") as exc_info:
+        resolve_message_type_hint(handler)
+
+    assert "Could not resolve annotations" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, NameError)
+
+
 # --- get_topic_regex wildcard segment (line 98) ---
 
 
-def test_get_topic_regex_wildcard_star():
-    # Exercises the `elif k in {"*", ">"}` branch (line 98)
+def test_get_topic_regex_wildcard_star_matches_single_segment():
+    import re
+
     pattern = get_topic_regex("events.*.created")
-    assert isinstance(pattern, str)
-    assert r"*" in pattern
+    assert re.fullmatch(pattern, "events.user.created")
+    assert not re.fullmatch(pattern, "events.created")
+    assert not re.fullmatch(pattern, "events.user.admin.created")
 
 
-def test_get_topic_regex_wildcard_greater():
+def test_get_topic_regex_wildcard_greater_matches_remaining_segments():
+    import re
+
     pattern = get_topic_regex("events.>")
-    assert isinstance(pattern, str)
-    assert r"*" in pattern
+    assert re.fullmatch(pattern, "events.user")
+    assert re.fullmatch(pattern, "events.user.created")
+    assert not re.fullmatch(pattern, "events")
+
+
+def test_get_topic_regex_bare_star_is_valid_pattern():
+    import re
+
+    pattern = get_topic_regex("*")
+    assert re.fullmatch(pattern, "events")
+    assert not re.fullmatch(pattern, "events.user")
+
+
+def test_get_topic_regex_escapes_dots():
+    import re
+
+    pattern = get_topic_regex("events.user.created")
+    assert not re.fullmatch(pattern, "eventsXuserXcreated")
 
 
 # --- is_async_callable with functools.partial (line 140) ---

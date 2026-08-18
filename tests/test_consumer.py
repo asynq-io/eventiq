@@ -1,3 +1,6 @@
+import inspect
+from typing import Any
+
 import anyio
 import pytest
 
@@ -91,6 +94,29 @@ def test_consumer_requires_event_type():
         FnConsumer(fn=lambda _msg: None, event_type=None, name="x", topic="t")
 
 
+def test_consumer_unresolvable_annotation_names_the_annotation():
+    """An unresolvable handler annotation must not be reported as a missing event type."""
+
+    async def handler(message) -> None:
+        pass
+
+    # Equivalent to importing the event type only under `if TYPE_CHECKING`
+    handler.__annotations__ = {"message": "TypeCheckingOnlyEvent", "return": None}
+
+    with pytest.raises(TypeError, match="TypeCheckingOnlyEvent"):
+        FnConsumer(fn=handler, topic="t")
+
+
+def test_consumer_unannotated_handler_still_requires_event_type():
+    """A handler with no message annotation keeps the original clear error."""
+
+    async def handler(message) -> None:
+        pass
+
+    with pytest.raises(ValueError, match="Event type is required"):
+        FnConsumer(fn=handler, topic="t")
+
+
 def test_consumer_requires_topic():
     # CloudEvent has no default topic → ValueError
     with pytest.raises(ValueError, match="Topic is required"):
@@ -175,6 +201,61 @@ def test_generic_consumer_publish_in_context(service):
 
     consumer = service.consumers["publish_in_ctx_consumer"]
     assert consumer.publish == service.publish
+
+
+def test_group_attrs_are_not_shared_between_registrations():
+    """Registering one class in two groups must not let the attrs of one leak."""
+
+    class MyConsumer(GenericConsumer[CloudEvent]):
+        prefix = "default"
+
+        def __init__(self, *, prefix: str | None = None, **extra: Any) -> None:
+            self.prefix = prefix or type(self).prefix
+            super().__init__(**extra)
+
+        async def process(self, message: CloudEvent) -> None:
+            pass
+
+    group_one = ConsumerGroup(attrs={"prefix": "one"})
+    group_two = ConsumerGroup(attrs={"prefix": "two"})
+    group_one.subscribe(MyConsumer, topic="t", name="c1")
+    group_two.subscribe(MyConsumer, topic="t", name="c2")
+
+    assert group_one.consumers["c1"].prefix == "one"
+    assert group_two.consumers["c2"].prefix == "two"
+    assert MyConsumer.prefix == "default"
+
+
+@pytest.mark.parametrize("as_class", [False, True])
+def test_group_attrs_topic_is_a_default_for_both_handler_kinds(as_class):
+    """attrs={"topic": ...} acts as a default topic, whatever the handler kind."""
+
+    class MyConsumer(GenericConsumer[CloudEvent]):
+        async def process(self, message: CloudEvent) -> None:
+            pass
+
+    async def handler(message: CloudEvent) -> None:
+        pass
+
+    handler_or_cls = MyConsumer if as_class else handler
+    group = ConsumerGroup(attrs={"topic": "attrs.topic"})
+    group.subscribe(handler_or_cls, name="default_topic")
+    group.subscribe(handler_or_cls, name="explicit_topic", topic="explicit.topic")
+
+    assert group.consumers["default_topic"].topic == "attrs.topic"
+    assert group.consumers["explicit_topic"].topic == "explicit.topic"
+    # The read-only property must survive registration
+    assert isinstance(inspect.getattr_static(MyConsumer, "topic"), property)
+
+
+def test_group_attrs_reject_read_only_property():
+    class MyConsumer(GenericConsumer[CloudEvent]):
+        async def process(self, message: CloudEvent) -> None:
+            pass
+
+    group = ConsumerGroup(attrs={"publish": "nope"})
+    with pytest.raises(ValueError, match="read-only property"):
+        group.subscribe(MyConsumer, topic="t", name="c")
 
 
 def test_channel_consumer_with_explicit_name():

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from abc import ABC
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
 from nats.aio.client import Client
 from nats.aio.msg import Msg as NatsMsg
+from nats.errors import NotJSMessageError
 from nats.errors import TimeoutError as NatsTimeoutError
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from eventiq.types import ID, DecodedMessage
 
 NatsUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["nats"])]
+
+PENDING_LIMIT_OPTIONS = ("pending_msgs_limit", "pending_bytes_limit")
 
 
 class NatsSettings(UrlBrokerSettings[NatsUrl]):
@@ -39,9 +41,8 @@ if TYPE_CHECKING:
 
 
 class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
-    """:param auto_flush: auto flush messages on publish
-    :param auto_flush: auto flush on publish
-    :param kwargs: options for base class
+    """:param auto_flush: Auto-flush messages after publish.
+    :param kwargs: Options forwarded to the base class.
     """
 
     protocol = "nats"
@@ -74,7 +75,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
     @staticmethod
     def decode_message(raw_message: NatsMsg) -> DecodedMessage:
-        return raw_message.data, raw_message.headers
+        return raw_message.data, raw_message.headers or {}
 
     @staticmethod
     def get_message_metadata(raw_message: NatsMsg) -> dict[str, str]:
@@ -88,7 +89,7 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
                 ),
                 "messaging.nats.num_delivered": str(raw_message.metadata.num_delivered),
             }
-        except AttributeError:
+        except (AttributeError, NotJSMessageError):
             return {}
 
     async def connect(self) -> None:
@@ -107,15 +108,19 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
     def is_connected(self) -> bool:
         return self.client.is_connected
 
-    async def ack(self, raw_message: NatsMsg) -> None:
-        await raw_message.ack()
-
-    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
-        await raw_message.nak(delay=delay)
-
 
 class NatsBroker(AbstractNatsBroker[None]):
+    """
+    Nats broker implementation
+    """
+
     Settings = NatsSettings
+
+    async def ack(self, raw_message: NatsMsg) -> None:
+        """No-op: core NATS messages carry no reply subject to acknowledge."""
+
+    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
+        """No-op: core NATS has no redelivery, so a message cannot be rejected."""
 
     async def sender(
         self,
@@ -124,9 +129,19 @@ class NatsBroker(AbstractNatsBroker[None]):
         send_stream: MemoryObjectSendStream,
     ) -> None:
         queue = "" if consumer.dynamic else f"{group}:{consumer.name}"
+        # Core NATS has no publisher backpressure: once a subscription's pending
+        # queue is full nats-py drops the message and reports a slow consumer.
+        # Only forward the limits the user set explicitly, so nats-py's generous
+        # defaults stay in place otherwise.
+        pending_limits = {
+            key: consumer.options[key]
+            for key in PENDING_LIMIT_OPTIONS
+            if key in consumer.options
+        }
         subscription = await self.client.subscribe(
             subject=self.format_topic(consumer.topic),
             queue=queue,
+            **pending_limits,
         )
         try:
             async with send_stream:
@@ -156,14 +171,20 @@ class NatsBroker(AbstractNatsBroker[None]):
 class JetStreamBroker(
     AbstractNatsBroker[api.PubAck],
 ):
-    """NatsBroker with JetStream enabled
-    :param jetstream_options: additional options passed to nc.jetstream(...)
-    :param kv_options: options for nats KV initialization.
-    :param kwargs: all other options for base classes NatsBroker, Broker.
+    """NatsBroker with JetStream enabled.
+
+    :param jetstream_options: Additional options passed to ``nc.jetstream(...)``.
+    :param kwargs: Options forwarded to the base classes.
     """
 
     _DEFAULT_MAX_RETRIES = 3
     Settings = JetStreamSettings
+
+    async def ack(self, raw_message: NatsMsg) -> None:
+        await raw_message.ack()
+
+    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
+        await raw_message.nak(delay=delay)
 
     def __init__(
         self,
@@ -227,11 +248,12 @@ class JetStreamBroker(
             async with send_stream:
                 while True:
                     try:
-                        batch = consumer.concurrency - len(
-                            send_stream._state.buffer,  # noqa: SLF001
+                        batch = (
+                            consumer.concurrency
+                            - send_stream.statistics().current_buffer_used
                         )
-                        if batch == 0:
-                            await asyncio.sleep(0.1)
+                        if batch <= 0:
+                            await anyio.sleep(0.1)
                             continue
                         self.logger.debug("Fetching %d messages", batch)
                         messages = await subscription.fetch(
@@ -244,8 +266,11 @@ class JetStreamBroker(
                     except NatsTimeoutError:
                         self.logger.debug("Suppressing nats timeout error")
         finally:
-            if consumer.dynamic:
-                await subscription.unsubscribe()
+            # Shielded: cancellation is level-triggered, so an unshielded await here
+            # would be cancelled immediately and leak the ephemeral consumer.
+            with anyio.move_on_after(1, shield=True):
+                if consumer.dynamic:
+                    await subscription.unsubscribe()
             self.logger.info("Stopped sender for consumer: %s", consumer.name)
 
     def should_nack(self, raw_message: NatsMsg) -> bool:

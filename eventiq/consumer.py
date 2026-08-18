@@ -6,9 +6,10 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
-    ClassVar,
     Concatenate,
     Generic,
+    get_args,
+    get_origin,
     overload,
 )
 from uuid import uuid4
@@ -55,26 +56,25 @@ class Consumer(ABC, Generic[CloudEventType]):
         decoder: Decoder | None = None,
         retry_strategy: RetryStrategy | None = None,
         dynamic: bool = False,
-        store_results: bool = False,
         tags: list[str] | None = None,
         publishes: list[Publishes] | None = None,
         parameters: dict[str, Parameter] | None = None,
         asyncapi_extra: dict[str, Any] | None = None,
         **options: Any,
     ) -> None:
+        if concurrency < 1:
+            msg = "Concurrency must be greater than 0"
+            raise ValueError(msg)
         if event_type is None:
             msg = "Event type is required"
             raise ValueError(msg)
+        self.name = name
+        self.event_type = event_type
         topic = topic or event_type.get_default_topic()
         if not topic:
             msg = "Topic is required"
             raise ValueError(msg)
-        if concurrency < 1:
-            msg = "Concurrency must be greater than 0"
-            raise ValueError(msg)
-        self.name = name
-        self.event_type = event_type
-        self.topic = topic
+        self._topic = topic
         self.timeout = timeout
         self.tags = tags
         self.encoder = encoder
@@ -82,13 +82,16 @@ class Consumer(ABC, Generic[CloudEventType]):
         self.dynamic = dynamic
         self.concurrency = concurrency
         self.retry_strategy = retry_strategy
-        self.store_results = store_results
         self.parameters = parameters or {}
         self.description = description
         self.publishes = publishes or []
         self.asyncapi_extra = asyncapi_extra or {}
         self.options = options
         self.logger = get_logger(__name__, self.name)
+
+    @property
+    def topic(self) -> str:
+        return self._topic
 
     if TYPE_CHECKING:
         process: Callable[Concatenate[CloudEventType, ...], Awaitable[Any]]
@@ -99,7 +102,17 @@ class Consumer(ABC, Generic[CloudEventType]):
             raise NotImplementedError
 
 
+_CONSUMER_INIT_KWARGS: frozenset[str] = frozenset(
+    inspect.signature(Consumer.__init__).parameters,
+) - {"self", "options"}
+
+
 class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
+    """
+    Function consumer. This class should not be used directly, the object is created
+    by the framework when `@service.subscribe` decorator is used.
+    """
+
     def __init__(
         self,
         *,
@@ -112,9 +125,10 @@ class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
             extra["event_type"] = resolve_message_type_hint(fn)
         if "description" not in extra:
             extra["description"] = fn.__doc__ or ""
-        if not is_async_callable(fn):
-            fn = to_async(fn)
-        self.fn = resolved_func(fn)  # type: ignore[arg-type]
+        async_fn: Callable[Concatenate[CloudEventType, P], Awaitable[Any]] = (
+            fn if is_async_callable(fn) else to_async(fn)
+        )
+        self.fn = resolved_func(async_fn)
         super().__init__(**extra)
 
     async def process(
@@ -127,13 +141,33 @@ class FnConsumer(Consumer[CloudEventType], Generic[CloudEventType, P]):
 
 
 class GenericConsumer(Consumer[CloudEventType], ABC):
-    service: ClassVar[ServiceContext] = ServiceContext()
+    """
+    Class based consumer
+    """
+
+    service: ServiceContext = ServiceContext()
+
+    @classmethod
+    def _resolve_event_type(cls) -> type[Any]:
+        """Infer the event type from the parametrized `GenericConsumer[...]` base."""
+        for base in getattr(cls, "__orig_bases__", ()):
+            origin = get_origin(base)
+            if isinstance(origin, type) and issubclass(origin, GenericConsumer):
+                args = get_args(base)
+                if args:
+                    return args[0]
+        msg = (
+            f"Could not infer event_type for {cls.__name__}: parametrize the "
+            f"consumer (e.g. class {cls.__name__}(GenericConsumer[MyEvent])) "
+            f"or pass event_type explicitly"
+        )
+        raise ValueError(msg)
 
     def __init__(self, **extra: Any) -> None:
         if "name" not in extra:
             extra["name"] = getattr(type(self), "name", type(self).__name__)
         if "event_type" not in extra:
-            extra["event_type"] = type(self).__orig_bases__[0].__args__[0]  # type: ignore[attr-defined]
+            extra["event_type"] = self._resolve_event_type()
         if "description" not in extra:
             extra["description"] = type(self).__doc__ or ""
         super().__init__(**extra)
@@ -145,13 +179,17 @@ class GenericConsumer(Consumer[CloudEventType], ABC):
 
 
 class ChannelConsumer(Consumer[CloudEventType]):
+    """
+    Short-lived, ephemeral consumer, to be created in runtime
+    """
+
     def __init__(
         self,
         channel: MemoryObjectSendStream[tuple[CloudEventType, Callable[[], None]]],
         **extra: Any,
     ) -> None:
+        extra.setdefault("dynamic", True)
         if "name" not in extra:
-            extra.setdefault("dynamic", True)
             extra["name"] = f"{socket.gethostname()}:{uuid4()}"
         super().__init__(**extra)
         self.channel = channel
@@ -165,9 +203,35 @@ class ChannelConsumer(Consumer[CloudEventType]):
 
 
 class ConsumerGroup:
-    def __init__(self, **options: Unpack[ConsumerGroupOptions]) -> None:
+    """
+    Consumer group. Similar to how FastAPI groups paths using APIRouter.
+    :param attrs: Extra keyword arguments passed to the constructor of every
+        consumer registered in this group, below explicit `subscribe` arguments.
+    :param options: Default options to set for each consumer in this group.
+    """
+
+    def __init__(
+        self,
+        *,
+        attrs: dict[str, Any] | None = None,
+        **options: Unpack[ConsumerGroupOptions],
+    ) -> None:
+        self.attrs = attrs or {}
         self.options = options
         self.consumers: dict[str, Consumer] = {}
+
+    def _validate_attrs(self, cls: type[Consumer]) -> None:
+        """Reject attrs which cannot be applied to `cls` instead of failing obscurely."""
+        for key in self.attrs:
+            if key in _CONSUMER_INIT_KWARGS:
+                continue
+            attr = inspect.getattr_static(cls, key, None)
+            if isinstance(attr, property) and attr.fset is None:
+                msg = (
+                    f"Attribute {key!r} is a read-only property of "
+                    f"{cls.__name__} and cannot be set via consumer group attrs"
+                )
+                raise ValueError(msg)
 
     def add_consumer(self, consumer: Consumer) -> None:
         self.consumers[consumer.name] = consumer
@@ -233,6 +297,7 @@ class ConsumerGroup:
                 raise TypeError(
                     msg,
                 )
+            self._validate_attrs(cls)
             options.update(
                 {
                     "name": name,
@@ -251,6 +316,12 @@ class ConsumerGroup:
                 },
             )
             filtered_options = {k: v for k, v in options.items() if v is not None}
+            # Attrs and group options are passed to the constructor rather than set
+            # on the class or the instance afterwards: the class object is shared by
+            # every group and service, and post-construction attributes cannot
+            # influence __init__ (nor overwrite read-only properties like `topic`).
+            for k, v in self.attrs.items():
+                filtered_options.setdefault(k, v)
             for k, v in self.options.items():
                 filtered_options.setdefault(k, v)
             consumer = cls(**filtered_options)

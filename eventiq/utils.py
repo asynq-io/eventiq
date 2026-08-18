@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import (
     TYPE_CHECKING,
     Any,
+    Concatenate,
     Literal,
     TypeGuard,
     TypeVar,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=Any)
+T = TypeVar("T")
 
 
 TOPIC_PATTERN = re.compile(r"{\w+}")
@@ -35,7 +37,19 @@ def utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
+@overload
+def to_async(
+    func: Callable[Concatenate[T, P], R],
+) -> Callable[Concatenate[T, P], Awaitable[R]]: ...
+
+
+@overload
+def to_async(func: Callable[P, R]) -> Callable[P, Awaitable[R]]: ...
+
+
 def to_async(func: Callable[P, R]) -> Callable[P, Awaitable[R]]:
+    """Run `func` in a worker thread, preserving its (possibly `Concatenate`d) signature."""
+
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> Awaitable[R]:
         if args or kwargs:
@@ -46,25 +60,39 @@ def to_async(func: Callable[P, R]) -> Callable[P, Awaitable[R]]:
 
 
 def get_safe_url(url: str) -> str:
+    """Return `url` with its password redacted, preserving the rest verbatim."""
     parsed = urlparse(url)
-    if parsed.username and parsed.password:
+    if parsed.password:
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
         parsed = parsed._replace(
-            netloc="{}:{}@{}:{}".format(
-                parsed.username or "",
-                "*****",
-                parsed.hostname,
-                parsed.port,
-            ),
+            netloc=f"{parsed.username or ''}:*****@{host}",
         )
     return parsed.geturl()
 
 
 def resolve_message_type_hint(func: Callable) -> type[Any] | None:
+    """Resolve the event type a handler accepts.
+
+    Annotations are always evaluated, so handlers defined in modules using
+    `from __future__ import annotations` resolve to types rather than strings.
+    Returns `None` for an unannotated handler, but raises `TypeError` when an
+    annotation exists and cannot be resolved, rather than reporting it later as
+    a missing event type.
+    """
+    if not getattr(func, "__annotations__", None):
+        return None
     try:
-        return func.__annotations__["message"]
-    except (AttributeError, KeyError):
-        pass
-    hints = get_type_hints(func)
+        hints = get_type_hints(func)
+    except (NameError, TypeError) as e:
+        name = getattr(func, "__qualname__", None) or repr(func)
+        msg = (
+            f"Could not resolve annotations of {name}: {e}. Types used in handler "
+            "signatures must be importable at runtime, not only under "
+            "`if TYPE_CHECKING`."
+        )
+        raise TypeError(msg) from e
     if "message" in hints:
         return hints["message"]
     hints.pop("return", None)
@@ -88,16 +116,16 @@ def format_topic(topic: str, wildcard_one: str, wildcard_many: str) -> str:
 
 
 def get_topic_regex(topic: str) -> str:
+    """Build a regex matching `topic`, expanding `{param}`/`*`/`>` wildcards."""
     result = []
 
     for k in topic.split("."):
-        if re.fullmatch(TOPIC_PATTERN, k):
-            result.append(r"\w+")
-
-        elif k in {"*", ">"}:
-            result.append(r"*")
+        if re.fullmatch(TOPIC_PATTERN, k) or k == "*":
+            result.append(r"[^.]+")
+        elif k == ">":
+            result.append(r".+")
         else:
-            result.append(k)
+            result.append(re.escape(k))
     return r"^{}$".format(r"\.".join(result))
 
 
@@ -119,9 +147,6 @@ def to_float(timeout: Timeout | None) -> float | None:
 
 def get_annotation(value: str) -> type:
     return cast("type", Literal[value])
-
-
-T = TypeVar("T")
 
 
 AwaitableCallable = Callable[..., Awaitable[T]]

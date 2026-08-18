@@ -1,6 +1,6 @@
 [project]
 name = "eventiq"
-version = "2.0.0rc"
+version = "2.0.0rc1"
 description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -47,6 +47,7 @@ dependencies = [
     "pydantic >2.0,<3",
     "pydantic-settings>2.0,<3",
     "pydantic-asyncapi==0.2.1",
+    "typing-extensions>=4.0,<5.0",
 ]
 
 [project.urls]
@@ -60,12 +61,26 @@ Source = "https://github.com/asynq-io/eventiq"
 eventiq = "eventiq.cli:cli"
 
 [project.optional-dependencies]
-nats = ["nats-py"]
-rabbitmq = ["aio-pika"]
-kafka = ["aiokafka"]
-redis = ["redis"]
-msgpack = ["ormsgpack"]
+# backends
+nats = ["nats-py>=2.14.0,<3.0"]
+rabbitmq = ["aio-pika>=9.6.1,<10.0"]
+kafka = ["aiokafka>=0.13.0,<2.0"]
+redis = ["redis>=7.2.1,<8.0"]
+# encoders
+msgpack = ["ormsgpack>=1.12.2,<2.0"]
+# observability
+prometheus = ["prometheus-client>=0.26.0"]
+opentelemetry = [
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-instrumentation>=0.65b0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-semantic-conventions>=0.65b0",
+]
+# integrations
+di = ["modern-di>=3.3.0,<4.0"]
+fastapi = ["fastapi>=0.141.1,<1.0"]
 
+standard = ["eventiq[di,prometheus,opentelemetry]"]
 
 [dependency-groups]
 dev = [
@@ -82,6 +97,8 @@ test = [
     "pytest-sugar",
     "pytest-repeat",
     "pytest-timeout",
+    "structlog",
+    "modern-di>=3.3,<4",
 ]
 
 lint = [
@@ -92,11 +109,15 @@ lint = [
 ]
 
 docs = [
-    "mkdocs",
+    "mkdocs<2.0",
     "mkdocs-material",
     "mkdocs-autorefs",
     "mkdocstrings[python]",
     "watchdog",
+    "nats-py",
+    "aio-pika",
+    "aiokafka",
+    "redis",
 ]
 
 
@@ -163,6 +184,7 @@ ignore = [
     "B008",     # do not perform function calls in argument defaults
     "BLE001",
     "COM812",
+    "CPY001",
     "D",
     "E501",     # line too long
     "N818",

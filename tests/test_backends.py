@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import pytest
+from aiokafka import TopicPartition
+from aiokafka.abc import ConsumerRebalanceListener
 from typing_extensions import Self
 
-from eventiq.backends.kafka import KafkaBroker
+from eventiq.backends.kafka import (
+    KafkaBroker,
+    KafkaRebalanceListener,
+    KafkaSubscription,
+    PartitionOffsets,
+)
 from eventiq.backends.nats import JetStreamBroker, NatsBroker
 from eventiq.backends.rabbitmq import RabbitmqBroker
 from eventiq.backends.redis import RedisBroker
@@ -20,6 +28,7 @@ from eventiq.backends.stub import StubBroker, StubMessage
 from eventiq.broker import Broker, UrlBroker
 from eventiq.exceptions import BrokerConnectionError, BrokerError
 from eventiq.settings import UrlBrokerSettings
+from eventiq.utils import utc_now
 
 
 def _consumer(
@@ -73,6 +82,15 @@ def test_broker_get_num_delivered_with_attr(broker):
 
 def test_broker_get_num_delivered_no_attr(broker):
     assert broker.get_num_delivered(object()) is None
+
+
+@pytest.mark.anyio
+async def test_broker_check_health_defaults_to_is_connected(broker):
+    """Backends without a real probe keep working through the default."""
+    assert await broker.check_health() is False
+    await broker.connect()
+    assert await broker.check_health() is True
+    await broker.disconnect()
 
 
 def test_stub_broker_from_settings():
@@ -201,6 +219,25 @@ async def test_stub_broker_publish_no_wait():
 
 
 @pytest.mark.anyio
+async def test_stub_broker_publish_tolerates_topic_registered_while_awaiting():
+    """Senders register their topic lazily, mid-publish, resizing `topics`."""
+    broker = StubBroker(wait_on_publish=False)
+    await broker.connect()
+    queue = broker.topics["test.topic"]
+    original_put = queue.put
+
+    async def put_and_register(message: StubMessage) -> None:
+        broker.topics["late.topic"]  # a sender starting up while publish awaits
+        await original_put(message)
+
+    queue.put = put_and_register
+    result = await broker.publish("test.topic", b"{}", headers={})
+
+    assert "test.topic" in result
+    await broker.disconnect()
+
+
+@pytest.mark.anyio
 async def test_stub_broker_disconnect_no_task():
     broker = StubBroker()
     await broker.disconnect()
@@ -289,14 +326,23 @@ def test_kafka_get_message_metadata_no_key():
     assert "messaging.kafka.message.key" not in meta
 
 
-def test_kafka_is_connected():
-    assert KafkaBroker(url="kafka://localhost:9092").is_connected
+def test_kafka_is_connected_reflects_producer_state():
+    assert not KafkaBroker(url="kafka://localhost:9092").is_connected
 
 
-def test_kafka_should_nack_old_message():
+def test_kafka_should_not_nack_old_message():
+    """An old message is past the retry window, so it must not be nacked."""
     broker = KafkaBroker(url="kafka://localhost:9092")
     record = MagicMock()
     record.timestamp = 0
+    assert not broker.should_nack(record)
+
+
+def test_kafka_should_nack_recent_message():
+    """A message younger than validate_error_delay is still retryable."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    record = MagicMock()
+    record.timestamp = int(utc_now().timestamp() * 1000)
     assert broker.should_nack(record)
 
 
@@ -323,6 +369,40 @@ async def test_kafka_connect_idempotent():
         await broker.connect()
         await broker.connect()
         mock_producer.start.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_kafka_check_health_fetches_metadata():
+    """A live producer object proves nothing; the probe must reach the cluster."""
+    mock_producer = AsyncMock()
+    with patch("eventiq.backends.kafka.AIOKafkaProducer", return_value=mock_producer):
+        broker = KafkaBroker(url="kafka://localhost:9092")
+        await broker.connect()
+
+        assert await broker.check_health() is True
+
+    mock_producer.client.fetch_all_metadata.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_kafka_check_health_surfaces_dead_cluster():
+    """`is_connected` still reports True once the cluster is gone."""
+    mock_producer = AsyncMock()
+    mock_producer.client.fetch_all_metadata = AsyncMock(
+        side_effect=ConnectionError("cluster gone")
+    )
+    with patch("eventiq.backends.kafka.AIOKafkaProducer", return_value=mock_producer):
+        broker = KafkaBroker(url="kafka://localhost:9092")
+        await broker.connect()
+
+        assert broker.is_connected
+        with pytest.raises(ConnectionError):
+            await broker.check_health()
+
+
+@pytest.mark.anyio
+async def test_kafka_check_health_before_connect():
+    assert await KafkaBroker(url="kafka://localhost:9092").check_health() is False
 
 
 @pytest.mark.anyio
@@ -353,7 +433,7 @@ async def test_kafka_publish():
             message_id="msg-1",
             message_time=datetime.now(timezone.utc),
         )
-        kwargs = mock_producer.send.call_args.kwargs
+        kwargs = mock_producer.send_and_wait.call_args.kwargs
         assert kwargs["topic"] == "test.topic"
         assert kwargs["value"] == b"body"
 
@@ -372,34 +452,74 @@ async def test_kafka_publish_explicit_timestamp_ms():
             message_time=datetime.now(timezone.utc),
             timestamp_ms=12345,
         )
-        assert mock_producer.send.call_args.kwargs["timestamp_ms"] == 12345
+        assert mock_producer.send_and_wait.call_args.kwargs["timestamp_ms"] == 12345
+
+
+def _kafka_record(topic: str, partition: int, offset: int) -> MagicMock:
+    record = MagicMock()
+    record.topic = topic
+    record.partition = partition
+    record.offset = offset
+    return record
+
+
+def _kafka_subscription() -> tuple[KafkaSubscription, AsyncMock]:
+    """Subscription over a mock subscriber whose `seek` stays synchronous."""
+    subscriber = AsyncMock()
+    subscriber.seek = MagicMock()
+    return KafkaSubscription(subscriber), subscriber
 
 
 @pytest.mark.anyio
 async def test_kafka_ack_commits_offset():
     broker = KafkaBroker(url="kafka://localhost:9092")
-    record = MagicMock()
-    record.topic = "t"
-    record.partition = 0
-    record.offset = 5
     subscriber = AsyncMock()
-    broker._subcsribers[id(record)] = subscriber
+    subscription = KafkaSubscription(subscriber)
+    record = _kafka_record("t", 0, 5)
+    subscription.track(record)
+
     await broker.ack(record)
-    subscriber.commit.assert_called_once()
+
+    subscriber.commit.assert_called_once_with({TopicPartition("t", 0): 6})
 
 
 @pytest.mark.anyio
-async def test_kafka_ack_no_subscriber():
+async def test_kafka_ack_no_subscription_is_noop():
     await KafkaBroker(url="kafka://localhost:9092").ack(MagicMock())
 
 
 @pytest.mark.anyio
-async def test_kafka_nack_removes_subscriber():
+async def test_kafka_ack_commits_only_contiguous_offsets():
+    """A later ack must not commit past an earlier message that is still in flight."""
     broker = KafkaBroker(url="kafka://localhost:9092")
-    record = MagicMock()
-    broker._subcsribers[id(record)] = AsyncMock()
-    await broker.nack(record)
-    assert id(record) not in broker._subcsribers
+    subscriber = AsyncMock()
+    subscription = KafkaSubscription(subscriber)
+    first = _kafka_record("t", 0, 5)
+    second = _kafka_record("t", 0, 6)
+    subscription.track(first)
+    subscription.track(second)
+
+    await broker.ack(second)
+    subscriber.commit.assert_not_called()
+
+    await broker.ack(first)
+    subscriber.commit.assert_called_once_with({TopicPartition("t", 0): 7})
+
+
+@pytest.mark.anyio
+async def test_kafka_nack_does_not_commit():
+    """A nacked offset stays uncommitted so the message can be redelivered."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    nacked = _kafka_record("t", 0, 5)
+    later = _kafka_record("t", 0, 6)
+    subscription.track(nacked)
+    subscription.track(later)
+
+    await broker.nack(nacked)
+    await broker.ack(later)
+
+    subscriber.commit.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -482,6 +602,267 @@ async def test_kafka_sender_dynamic_unsubscribes():
             tg.cancel_scope.cancel()
 
     mock_sub.unsubscribe.assert_called_once()
+
+
+async def _run_kafka_sender(topic: str) -> MagicMock:
+    """Run `sender` until it blocks on the first fetch, returning the subscriber."""
+    mock_sub = MagicMock()
+    mock_sub.subscribe = MagicMock()
+    mock_sub.start = AsyncMock()
+    mock_sub.stop = AsyncMock()
+
+    async def blocking(**kwargs: Any) -> dict:
+        await anyio.sleep(10)
+        return {}
+
+    mock_sub.getmany = blocking
+    with patch("eventiq.backends.kafka.AIOKafkaConsumer", return_value=mock_sub):
+        broker = KafkaBroker(url="kafka://localhost:9092")
+        send, _ = anyio.create_memory_object_stream()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(broker.sender, "grp", _consumer(topic), send)
+            await anyio.sleep(0.01)
+            tg.cancel_scope.cancel()
+    return mock_sub
+
+
+@pytest.mark.anyio
+async def test_kafka_sender_subscribes_with_anchored_pattern():
+    """aiokafka matches topics with `re.match`, so the pattern must be anchored."""
+    mock_sub = await _run_kafka_sender("test.topic")
+    pattern = mock_sub.subscribe.call_args.kwargs["pattern"]
+    assert re.match(pattern, "test.topic")
+    assert re.match(pattern, "testXtopic") is None
+    assert re.match(pattern, "test.topic.v2") is None
+    assert re.match(pattern, "prefix.test.topic") is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("topic", "matching", "unrelated"),
+    [
+        ("*", "orders", "orders.created"),
+        ("orders.>", "orders.created.v2", "orders"),
+        ("orders.{tenant}", "orders.acme", "orders.acme.v2"),
+    ],
+)
+async def test_kafka_sender_pattern_expands_wildcards(topic, matching, unrelated):
+    """A wildcard topic must compile: `*` alone is not a valid regex."""
+    mock_sub = await _run_kafka_sender(topic)
+    pattern = mock_sub.subscribe.call_args.kwargs["pattern"]
+    assert re.match(pattern, matching)
+    assert re.match(pattern, unrelated) is None
+
+
+@pytest.mark.anyio
+async def test_kafka_sender_subscribes_with_rebalance_listener():
+    """Offset bookkeeping must be dropped when partition ownership changes."""
+    mock_sub = await _run_kafka_sender("test.topic")
+    listener = mock_sub.subscribe.call_args.kwargs["listener"]
+    assert isinstance(listener, ConsumerRebalanceListener)
+
+
+def test_kafka_decode_message_binary_header():
+    """Kafka header values are arbitrary bytes, so decoding must never raise."""
+    record = MagicMock()
+    record.value = b"{}"
+    record.headers = [("trace", b"\xff\xfe"), ("content-type", "application/json")]
+    data, headers = KafkaBroker.decode_message(record)
+    assert data == b"{}"
+    assert headers["content-type"] == "application/json"
+    assert headers["trace"]
+
+
+@pytest.mark.anyio
+async def test_kafka_publish_key_is_bytes():
+    """No key serializer is configured, so the key must already be bytes."""
+    mock_producer = AsyncMock()
+    with patch("eventiq.backends.kafka.AIOKafkaProducer", return_value=mock_producer):
+        broker = KafkaBroker(url="kafka://localhost:9092")
+        await broker.connect()
+        await broker.publish(
+            "t",
+            b"x",
+            headers={},
+            message_id="msg-1",
+            message_time=datetime.now(timezone.utc),
+        )
+    assert mock_producer.send_and_wait.call_args.kwargs["key"] == b"msg-1"
+
+
+@pytest.mark.anyio
+async def test_kafka_nack_does_not_rewind_partition():
+    """Kafka has no per-message redelivery: seeking back would refetch forever."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    record = _kafka_record("t", 0, 5)
+    subscription.track(record)
+
+    for _ in range(3):
+        await broker.nack(record)
+
+    subscriber.seek.assert_not_called()
+    subscriber.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_kafka_nack_stops_committing_partition():
+    """No offset at or after a nacked one may be committed, in either ack order."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    nacked = _kafka_record("t", 0, 5)
+    earlier = _kafka_record("t", 0, 6)
+    later = _kafka_record("t", 0, 7)
+    for record in (nacked, earlier, later):
+        subscription.track(record)
+
+    await broker.ack(earlier)
+    await broker.nack(nacked)
+    await broker.ack(later)
+
+    subscriber.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_kafka_nack_untracked_partition_is_noop():
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    record = _kafka_record("t", 0, 5)
+    subscription.track(record)
+    subscription.forget([TopicPartition("t", 0)])
+
+    await broker.nack(record)
+
+    subscriber.seek.assert_not_called()
+    subscriber.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_kafka_nacked_partition_commits_again_after_reassignment():
+    """A blocked partition must not stay blocked once its state is dropped."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    nacked = _kafka_record("t", 0, 5)
+    subscription.track(nacked)
+    await broker.nack(nacked)
+
+    KafkaRebalanceListener(subscription).on_partitions_assigned(
+        [TopicPartition("t", 0)]
+    )
+    redelivered = _kafka_record("t", 0, 5)
+    subscription.track(redelivered)
+    await broker.ack(redelivered)
+
+    subscriber.commit.assert_called_once_with({TopicPartition("t", 0): 6})
+
+
+class _FakeKafkaConsumer:
+    """Consumer whose fetch position `seek` really moves, so a rewind refetches."""
+
+    def __init__(self, records: list[MagicMock]) -> None:
+        self.records = records
+        self.position = 0
+        self.subscribe = MagicMock()
+        self.commit = AsyncMock()
+
+    async def start(self) -> None:
+        return
+
+    async def stop(self) -> None:
+        return
+
+    def seek(self, tp: TopicPartition, offset: int) -> None:
+        self.position = offset
+
+    async def getmany(self, timeout_ms: int) -> dict[TopicPartition, list[MagicMock]]:
+        if self.position >= len(self.records):
+            await anyio.sleep(10)
+            return {}
+        batch = self.records[self.position :]
+        self.position = len(self.records)
+        return {TopicPartition("t", 0): batch}
+
+
+@pytest.mark.anyio
+async def test_kafka_sender_does_not_replay_nacked_records():
+    """A message that always fails must not refetch itself, or its successors, forever."""
+    records = [_kafka_record("t", 0, offset) for offset in range(3)]
+    delivered: list[int] = []
+    with patch(
+        "eventiq.backends.kafka.AIOKafkaConsumer",
+        return_value=_FakeKafkaConsumer(records),
+    ):
+        broker = KafkaBroker(url="kafka://localhost:9092")
+        send, receive = anyio.create_memory_object_stream()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(broker.sender, "grp", _consumer(), send)
+            with anyio.move_on_after(0.2):
+                async for record in receive:
+                    delivered.append(record.offset)
+                    await broker.nack(record)
+            tg.cancel_scope.cancel()
+
+    assert delivered == [0, 1, 2]
+
+
+@pytest.mark.anyio
+async def test_kafka_revoked_partition_ack_does_not_commit():
+    """Acks from a lost assignment must not commit offsets another member owns."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    record = _kafka_record("t", 0, 5)
+    subscription.track(record)
+
+    KafkaRebalanceListener(subscription).on_partitions_revoked([TopicPartition("t", 0)])
+    await broker.ack(record)
+
+    subscriber.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_kafka_assigned_partition_tracks_from_first_record():
+    """Stale state must not hold the watermark below a newly assigned partition."""
+    broker = KafkaBroker(url="kafka://localhost:9092")
+    subscription, subscriber = _kafka_subscription()
+    subscription.track(_kafka_record("t", 0, 5))
+
+    KafkaRebalanceListener(subscription).on_partitions_assigned(
+        [TopicPartition("t", 0)]
+    )
+    reassigned = _kafka_record("t", 0, 9)
+    subscription.track(reassigned)
+    await broker.ack(reassigned)
+
+    subscriber.commit.assert_called_once_with({TopicPartition("t", 0): 10})
+
+
+def test_kafka_partition_offsets_block_stops_advancing_watermark():
+    offsets = PartitionOffsets(5)
+    assert offsets.ack(5) == 6
+
+    offsets.block()
+
+    assert offsets.ack(6) is None
+    assert offsets.next_offset == 6
+
+
+def test_kafka_partition_offsets_block_drops_pending_acks():
+    """A blocked watermark can never cross the gap, so pending acks are dead weight."""
+    offsets = PartitionOffsets(5)
+    assert offsets.ack(6) is None
+
+    offsets.block()
+
+    assert offsets.acked == set()
+
+
+def test_kafka_partition_offsets_ignores_already_committed_ack():
+    """A seek can replay offsets below the watermark; re-acking them is a no-op."""
+    offsets = PartitionOffsets(5)
+    assert offsets.ack(5) == 6
+
+    assert offsets.ack(5) is None
+    assert offsets.next_offset == 6
 
 
 # ===========================================================================
@@ -572,16 +953,33 @@ async def test_nats_flush():
 
 
 @pytest.mark.anyio
-async def test_nats_ack():
+async def test_nats_core_ack_is_noop():
+    """Core NATS messages have no reply subject, so ack() must not touch them."""
     broker, _ = _nats_broker()
+    msg = AsyncMock()
+    await broker.ack(msg)
+    msg.ack.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_nats_core_nack_is_noop():
+    broker, _ = _nats_broker()
+    msg = AsyncMock()
+    await broker.nack(msg, delay=3)
+    msg.nak.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_jetstream_ack_acknowledges_message():
+    broker = JetStreamBroker(url="nats://localhost:4222")
     msg = AsyncMock()
     await broker.ack(msg)
     msg.ack.assert_called_once()
 
 
 @pytest.mark.anyio
-async def test_nats_nack():
-    broker, _ = _nats_broker()
+async def test_jetstream_nack_rejects_with_delay():
+    broker = JetStreamBroker(url="nats://localhost:4222")
     msg = AsyncMock()
     await broker.nack(msg, delay=3)
     msg.nak.assert_called_once_with(delay=3)
@@ -644,6 +1042,66 @@ async def test_nats_sender_delivers_message():
         received = await receive.receive()
         assert received is msg
         tg.cancel_scope.cancel()
+
+
+def _blocking_nats_subscription() -> AsyncMock:
+    async def blocking() -> Any:
+        await anyio.sleep(10)
+        return
+        yield  # makes this an async generator
+
+    sub = AsyncMock()
+    sub.messages = blocking()
+    sub.unsubscribe = AsyncMock()
+    return sub
+
+
+async def _run_nats_sender(consumer: MagicMock) -> AsyncMock:
+    """Run `sender` until it blocks on the subscription, returning the client."""
+    broker, client = _nats_broker()
+    client.subscribe = AsyncMock(return_value=_blocking_nats_subscription())
+
+    send, _ = anyio.create_memory_object_stream()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(broker.sender, "grp", consumer, send)
+        await anyio.sleep(0.01)
+        tg.cancel_scope.cancel()
+    return client
+
+
+@pytest.mark.anyio
+async def test_nats_sender_leaves_pending_limits_at_nats_defaults():
+    """Core NATS drops overflow instead of applying backpressure, so a lowered
+    default would silently discard bursts."""
+    client = await _run_nats_sender(_consumer(concurrency=4))
+
+    kwargs = client.subscribe.call_args.kwargs
+    assert "pending_msgs_limit" not in kwargs
+    assert "pending_bytes_limit" not in kwargs
+
+
+@pytest.mark.anyio
+async def test_nats_sender_pending_limits_are_overridable():
+    consumer = _consumer()
+    consumer.options = {"pending_msgs_limit": 7, "pending_bytes_limit": 999}
+
+    client = await _run_nats_sender(consumer)
+
+    kwargs = client.subscribe.call_args.kwargs
+    assert kwargs["pending_msgs_limit"] == 7
+    assert kwargs["pending_bytes_limit"] == 999
+
+
+@pytest.mark.anyio
+async def test_nats_sender_forwards_only_the_overridden_pending_limit():
+    consumer = _consumer()
+    consumer.options = {"pending_msgs_limit": 7}
+
+    client = await _run_nats_sender(consumer)
+
+    kwargs = client.subscribe.call_args.kwargs
+    assert kwargs["pending_msgs_limit"] == 7
+    assert "pending_bytes_limit" not in kwargs
 
 
 @pytest.mark.anyio
@@ -892,6 +1350,11 @@ def test_rmq_get_message_metadata():
     assert RabbitmqBroker.get_message_metadata(MagicMock()) == {}
 
 
+def test_rmq_get_message_metadata_accepts_keyword():
+    """The parameter name is part of the uniform backend surface."""
+    assert RabbitmqBroker.get_message_metadata(raw_message=MagicMock()) == {}
+
+
 @pytest.mark.anyio
 async def test_rmq_connect():
     exchange = AsyncMock()
@@ -907,6 +1370,65 @@ async def test_rmq_connect():
         await broker.connect()
         assert broker._connection is conn
         channel.declare_exchange.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_rmq_connect_closes_connection_on_declare_failure():
+    """A failed exchange declaration must leave no half-connected broker behind."""
+    exchange = AsyncMock()
+    failing_channel = AsyncMock()
+    failing_channel.declare_exchange = AsyncMock(side_effect=RuntimeError("boom"))
+    failing_conn = AsyncMock()
+    failing_conn.channel = AsyncMock(return_value=failing_channel)
+    channel = AsyncMock()
+    channel.declare_exchange = AsyncMock(return_value=exchange)
+    conn = AsyncMock()
+    conn.is_closed = False
+    conn.channel = AsyncMock(return_value=channel)
+    with patch(
+        "eventiq.backends.rabbitmq.aio_pika.connect_robust",
+        AsyncMock(side_effect=[failing_conn, conn]),
+    ):
+        broker = RabbitmqBroker(url="amqp://localhost:5672")
+        with pytest.raises(RuntimeError, match="boom"):
+            await broker.connect()
+        assert not broker.is_connected
+        failing_conn.close.assert_called_once()
+        with pytest.raises(BrokerConnectionError):
+            _ = broker.exchange
+
+        await broker.connect()
+
+    assert broker.is_connected
+    assert broker._exchange is exchange
+
+
+@pytest.mark.anyio
+async def test_rmq_connect_closes_connection_when_cancelled():
+    """Cancellation during connect must not leak the robust connection."""
+    closed = anyio.Event()
+
+    async def _channel(*_: object, **__: object) -> Any:
+        await anyio.sleep_forever()
+
+    async def _close(*_: object, **__: object) -> None:
+        await anyio.lowlevel.checkpoint()
+        closed.set()
+
+    conn = AsyncMock()
+    conn.channel = _channel
+    conn.close = _close
+    with patch(
+        "eventiq.backends.rabbitmq.aio_pika.connect_robust",
+        AsyncMock(return_value=conn),
+    ):
+        broker = RabbitmqBroker(url="amqp://localhost:5672")
+        with anyio.move_on_after(0.05) as scope:
+            await broker.connect()
+
+    assert scope.cancelled_caught
+    assert closed.is_set()
+    assert broker._connection is None
 
 
 @pytest.mark.anyio
@@ -1038,6 +1560,53 @@ async def test_rmq_sender_dynamic_unbinds():
     queue.unbind.assert_called_once()
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("default_prefetch_count", "concurrency", "expected"),
+    [(50, 1, 50), (10, 20, 40)],
+)
+async def test_rmq_sender_prefetch_count(
+    default_prefetch_count: int, concurrency: int, expected: int
+):
+    """`default_prefetch_count` must be reachable, not shadowed by concurrency."""
+    broker = RabbitmqBroker(
+        url="amqp://localhost:5672",
+        default_prefetch_count=default_prefetch_count,
+    )
+    conn = MagicMock()
+    conn.is_closed = False
+    broker._connection = conn
+    broker._exchange = AsyncMock()
+
+    class BlockingIter:
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def __aiter__(self) -> Self:
+            return self
+
+        async def __anext__(self) -> Any:
+            await anyio.sleep(10)
+            raise StopAsyncIteration
+
+    queue = AsyncMock()
+    queue.iterator = MagicMock(return_value=BlockingIter())
+    channel = AsyncMock()
+    channel.declare_queue = AsyncMock(return_value=queue)
+    conn.channel = AsyncMock(return_value=channel)
+
+    send, _ = anyio.create_memory_object_stream()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(broker.sender, "grp", _consumer(concurrency=concurrency), send)
+        await anyio.sleep(0.01)
+        tg.cancel_scope.cancel()
+
+    channel.set_qos.assert_awaited_once_with(prefetch_count=expected)
+
+
 # ===========================================================================
 # RedisBroker
 # ===========================================================================
@@ -1046,7 +1615,7 @@ async def test_rmq_sender_dynamic_unbinds():
 def _redis_broker() -> tuple[RedisBroker, MagicMock]:
     broker: RedisBroker = RedisBroker(url="redis://localhost:6379")
     redis = MagicMock()
-    redis.close = AsyncMock()
+    redis.aclose = AsyncMock()
     redis.publish = AsyncMock()
     redis.connection = MagicMock()
     redis.connection.is_connected = True
@@ -1065,17 +1634,23 @@ def test_redis_is_connected_true():
     assert broker.is_connected
 
 
-def test_redis_is_connected_no_connection():
+def test_redis_is_connected_before_connect():
+    """The property must report a status, never raise, before connect()."""
+    assert not RedisBroker(url="redis://localhost:6379").is_connected
+
+
+def test_redis_is_connected_with_pooled_client():
+    """A pooled client leaves `.connection` as None while still being usable."""
     broker, redis = _redis_broker()
     redis.connection = None
-    assert not broker.is_connected
+    assert broker.is_connected
 
 
 def test_redis_decode_message():
     raw = {"type": b"message", "pattern": None, "channel": b"t", "data": b"payload"}
     data, headers = RedisBroker.decode_message(raw)
     assert data == b"payload"
-    assert headers is None
+    assert headers == {}
 
 
 @pytest.mark.anyio
@@ -1088,10 +1663,78 @@ async def test_redis_connect():
 
 
 @pytest.mark.anyio
+async def test_redis_connect_is_idempotent():
+    """Replacing a live client would leak its connection pool's sockets."""
+    mock_redis = MagicMock()
+    with patch(
+        "eventiq.backends.redis.Redis.from_url", return_value=mock_redis
+    ) as from_url:
+        broker = RedisBroker(url="redis://localhost:6379")
+        await broker.connect()
+        await broker.connect()
+
+    from_url.assert_called_once()
+    assert broker._redis is mock_redis
+
+
+def test_redis_poll_timeout_from_settings(monkeypatch):
+    """`BROKER_POLL_TIMEOUT` must reach the broker like every other setting."""
+    monkeypatch.setenv("BROKER_URL", "redis://localhost:6379")
+    monkeypatch.setenv("BROKER_POLL_TIMEOUT", "17")
+
+    broker = RedisBroker.from_env()
+
+    assert broker.poll_timeout == 17
+
+
+def test_redis_poll_timeout_default():
+    assert RedisBroker(url="redis://localhost:6379").poll_timeout == 2
+
+
+@pytest.mark.anyio
+async def test_redis_check_health_pings_server():
+    broker, redis = _redis_broker()
+    redis.ping = AsyncMock(return_value=True)
+
+    assert await broker.check_health() is True
+    redis.ping.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_redis_check_health_false_when_ping_fails():
+    broker, redis = _redis_broker()
+    redis.ping = AsyncMock(return_value=False)
+
+    assert await broker.check_health() is False
+
+
+@pytest.mark.anyio
+async def test_redis_check_health_surfaces_dead_server():
+    """`is_connected` keeps reporting True after the server dies."""
+    broker, redis = _redis_broker()
+    redis.ping = AsyncMock(side_effect=ConnectionError("server gone"))
+
+    assert broker.is_connected
+    with pytest.raises(ConnectionError):
+        await broker.check_health()
+
+
+@pytest.mark.anyio
+async def test_redis_check_health_before_connect():
+    assert await RedisBroker(url="redis://localhost:6379").check_health() is False
+
+
+@pytest.mark.anyio
 async def test_redis_disconnect():
     broker, redis = _redis_broker()
     await broker.disconnect()
-    redis.close.assert_called_once()
+    redis.aclose.assert_called_once()
+    assert not broker.is_connected
+
+
+@pytest.mark.anyio
+async def test_redis_disconnect_without_connect_is_noop():
+    await RedisBroker(url="redis://localhost:6379").disconnect()
 
 
 @pytest.mark.anyio
