@@ -1,6 +1,7 @@
 import logging.config
 import shlex
 import sys
+from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -10,13 +11,15 @@ import typer
 from typing_extensions import Protocol, runtime_checkable
 
 from .imports import import_from_string
-from .logging import get_logger
+from .logging import KeyValueFormatter, get_logger
 from .models import CloudEvent
 from .service import Service
 
 cli = typer.Typer()
 
 logger = get_logger(__name__, "cli")
+
+DEFAULT_LOG_FORMAT = "%(levelname)s:%(name)s:%(message)s"
 
 
 class DocsFormat(str, Enum):
@@ -53,6 +56,13 @@ def import_service(path: str) -> Service:
         msg = f"Expected a `Service` instance, got {type(instance)}"
         raise TypeError(msg)
     return instance
+
+
+def _log_reload(changes: Iterable[tuple[Any, str]]) -> None:
+    logger.info(
+        "Reloading service",
+        extra={"changed_paths": sorted(path for _, path in changes)},
+    )
 
 
 def _build_target_from_opts(
@@ -94,7 +104,11 @@ def run(
     reload: str | None = typer.Option(None, help="Hot-reload on provided path"),
 ) -> None:
     # Configured before anything else, so the messages below are actually emitted.
-    logging.basicConfig(level=(log_level or "info").upper())
+    # The formatter renders the fields eventiq logs through `extra`, which the
+    # stdlib default would drop; an explicit --log-config still overrides it.
+    handler = logging.StreamHandler()
+    handler.setFormatter(KeyValueFormatter(DEFAULT_LOG_FORMAT))
+    logging.basicConfig(level=(log_level or "info").upper(), handlers=[handler])
     if log_config:
         logging.config.fileConfig(log_config)
 
@@ -106,7 +120,7 @@ def run(
                 "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'.",
             )
             return
-        logger.info("Watching for changes in: %s", reload)
+        logger.info("Watching for changes", extra={"reload_path": reload})
         target = _build_target_from_opts(
             service,
             log_level,
@@ -118,7 +132,7 @@ def run(
             reload,
             target=target,
             target_type="command",
-            callback=logger.info,
+            callback=_log_reload,
             sigint_timeout=30,
             sigkill_timeout=30,
         )
@@ -127,7 +141,7 @@ def run(
         return
 
     instance = import_runner(service)
-    logger.info("Running service: %s", service)
+    logger.info("Running service", extra={"service_path": service})
     anyio.run(
         instance.run,
         backend="asyncio",

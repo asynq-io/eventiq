@@ -347,7 +347,10 @@ class Service(LoggerMixin, Generic[Message, R]):
             # reference count equal to the number of running receivers.
             with receive_stream:
                 for i in range(consumer.concurrency):
-                    self.logger.info("Starting consumer %s task %s", consumer.name, i)
+                    self.logger.info(
+                        "Starting consumer task",
+                        extra={"consumer_name": consumer.name, "task_index": i},
+                    )
                     tg.start_soon(
                         self.receiver,
                         consumer,
@@ -429,7 +432,7 @@ class Service(LoggerMixin, Generic[Message, R]):
     async def watch_for_signals(self, scope: CancelScope) -> None:
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
             async for signum in signals:
-                self.logger.info("Received signal %s", signum.name)
+                self.logger.info("Received signal", extra={"signal": signum.name})
                 await self.dispatch_before("close_consumers")
                 scope.cancel()
 
@@ -447,17 +450,21 @@ class Service(LoggerMixin, Generic[Message, R]):
                     and not isinstance(message, middleware.requires)
                 ):
                     self.logger.debug(
-                        "Skipping event %s for middleware %s",
-                        event,
-                        type(middleware).__name__,
+                        "Skipping event for middleware",
+                        extra={
+                            "event": event,
+                            "middleware": type(middleware).__name__,
+                        },
                     )
                     continue
                 method = getattr(middleware, event, None)
                 if method is None:
                     self.logger.debug(
-                        "Method %s not found in middleware %s",
-                        event,
-                        type(middleware).__name__,
+                        "Method not found in middleware",
+                        extra={
+                            "event": event,
+                            "middleware": type(middleware).__name__,
+                        },
                     )
                     continue
 
@@ -513,7 +520,13 @@ class Service(LoggerMixin, Generic[Message, R]):
             # The message was not acknowledged and will be redelivered. Reporting
             # `after_ack` would make health and metrics middlewares record a
             # completion the broker never saw.
-            self.logger.error("Timed out acknowledging message %s", message)
+            self.logger.error(
+                "Timed out acknowledging message",
+                extra={
+                    "consumer_name": consumer.name,
+                    "raw_message": str(message),
+                },
+            )
             return
         try:
             await self.dispatch_after("ack", consumer=consumer, raw_message=message)
@@ -539,7 +552,14 @@ class Service(LoggerMixin, Generic[Message, R]):
         if scope.cancelled_caught:
             # As in `ack`: the broker never rejected the message, so middlewares
             # must not be told that it did.
-            self.logger.error("Timed out rejecting message %s", message)
+            self.logger.error(
+                "Timed out rejecting message",
+                extra={
+                    "consumer_name": consumer.name,
+                    "raw_message": str(message),
+                    "delay": delay,
+                },
+            )
             return
         try:
             await self.dispatch_after(
@@ -575,8 +595,11 @@ class Service(LoggerMixin, Generic[Message, R]):
                 # A poison message: redelivering it can only fail the same way, so
                 # it is dropped (or parked by brokers that can nack it with a delay).
                 self.logger.exception(
-                    "Failed to validate message %s.",
-                    raw_message,
+                    "Failed to validate message",
+                    extra={
+                        "consumer_name": consumer.name,
+                        "raw_message": str(raw_message),
+                    },
                     exc_info=e,
                 )
                 if self.broker.should_nack(raw_message):
@@ -594,8 +617,11 @@ class Service(LoggerMixin, Generic[Message, R]):
                 # redelivery rather than discarded. It must still not escape: that
                 # would kill the receiver task and with it the whole consumer.
                 self.logger.exception(
-                    "Unexpected decode failure for message %s.",
-                    raw_message,
+                    "Unexpected decode failure",
+                    extra={
+                        "consumer_name": consumer.name,
+                        "raw_message": str(raw_message),
+                    },
                     exc_info=e,
                 )
                 await self.nack(
@@ -612,9 +638,11 @@ class Service(LoggerMixin, Generic[Message, R]):
                     message=message,
                 )
                 self.logger.info(
-                    "Running consumer %s with message %s",
-                    consumer.name,
-                    message.id,
+                    "Running consumer",
+                    extra={
+                        "consumer_name": consumer.name,
+                        "message_id": str(message.id),
+                    },
                 )
                 with anyio.fail_after(timeout):
                     result = await consumer.process(message)

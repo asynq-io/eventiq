@@ -49,10 +49,12 @@ class ActorsMiddleware(Middleware[ActorMessage]):
             # about this failure as a `TimeoutError`. Log it with the correlation
             # id so an operator can tie the two together.
             self.logger.error(
-                "Actor %s failed handling conversation %s, no reply will be sent "
+                "Actor failed handling conversation, no reply will be sent "
                 "and the caller will time out.",
-                consumer.name,
-                message.conversation_id,
+                extra={
+                    "consumer_name": consumer.name,
+                    "conversation_id": str(message.conversation_id),
+                },
                 exc_info=exc,
             )
             return

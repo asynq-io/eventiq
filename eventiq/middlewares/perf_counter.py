@@ -8,10 +8,17 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from eventiq.middleware import CloudEventType, Middleware
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from eventiq import Consumer, Service
     from eventiq.types import ID
 
 DEFAULT_MAX_PENDING = 10_000
+
+_OPERATION_MESSAGES: Mapping[str, str] = {
+    "processed": "Message processed",
+    "published": "Message published",
+}
 
 _K = TypeVar("_K")
 
@@ -43,12 +50,13 @@ class PerfCounterMiddleware(Middleware[CloudEventType]):
         operation: Literal["processed", "published"],
         start_time: float,
     ) -> None:
-        elapsed = perf_counter() - start_time
         self.logger.log(
             self.log_level,
-            "Message %s in %.2f seconds.",
-            operation,
-            elapsed,
+            _OPERATION_MESSAGES[operation],
+            extra={
+                "operation": operation,
+                "elapsed_seconds": perf_counter() - start_time,
+            },
         )
 
     async def before_process_message(

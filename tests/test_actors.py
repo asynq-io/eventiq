@@ -449,9 +449,9 @@ async def test_actors_middleware_logs_handler_failure_with_conversation_id(caplo
     finally:
         reset_current_service(token)
 
-    assert "Boom" in caplog.text
-    assert str(conversation_id) in caplog.text
-    assert "will time out" in caplog.text
+    record = next(r for r in caplog.records if "will time out" in r.message)
+    assert record.consumer_name == "Boom"
+    assert record.conversation_id == str(conversation_id)
     assert "boom" in caplog.text
 
 

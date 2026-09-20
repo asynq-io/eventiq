@@ -56,17 +56,16 @@ class BaseRetryStrategy(LoggerMixin, Generic[CloudEventType]):
         delay = max(delay, self.min_delay)
         if self.log_exceptions:
             self.logger.warning(
-                "Will retry message %s in %d seconds.",
-                message.id,
-                delay,
+                "Will retry message",
+                extra={"message_id": str(message.id), "delay": delay},
                 exc_info=exc,
             )
         raise Retry(delay=delay) from exc
 
     def fail(self, message: CloudEventType, exc: Exception) -> None:
-        self.logger.exception(
-            "Retry limit exceeded for message %s",
-            message.id,
+        self.logger.error(
+            "Retry limit exceeded for message",
+            extra={"message_id": str(message.id)},
             exc_info=exc,
         )
         raise Fail(reason="Retry limit exceeded") from exc

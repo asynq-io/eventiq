@@ -111,6 +111,9 @@ def resolved_func(
             with anyio.move_on_after(delay=CLOSE_TIMEOUT, shield=True) as scope:
                 await resolver.close()
             if scope.cancelled_caught:
-                logger.error("Timed out closing dependency resolver %r", resolver)
+                logger.error(
+                    "Timed out closing dependency resolver",
+                    extra={"resolver": repr(resolver)},
+                )
 
     return wrapped

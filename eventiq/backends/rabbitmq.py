@@ -212,5 +212,7 @@ class RabbitmqBroker(
         delay: int | None = None,
     ) -> None:
         if delay is not None:
-            self.logger.warning("delay is not supported expected None got %d", delay)
+            self.logger.warning(
+                "Delay is not supported by this broker", extra={"delay": delay}
+            )
         await raw_message.reject(requeue=True)

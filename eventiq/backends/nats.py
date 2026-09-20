@@ -67,12 +67,16 @@ class AbstractNatsBroker(UrlBroker[NatsMsg, R], ABC):
 
     def _default_cb(
         self,
-        message: str,
+        event: str,
     ) -> Callable[[Exception | None], Awaitable[None]]:
         async def wrapped(error: Exception | None = None) -> None:
-            self.logger.warning(message)
+            self.logger.warning("Nats connection event", extra={"event": event})
             if error:
-                self.logger.error(error)
+                self.logger.error(
+                    "Nats connection error",
+                    extra={"event": event},
+                    exc_info=error,
+                )
 
         return wrapped
 
@@ -154,7 +158,7 @@ class NatsBroker(AbstractNatsBroker[None]):
             with anyio.move_on_after(1, shield=True):
                 if consumer.dynamic:
                     await subscription.unsubscribe()
-            self.logger.info("Sender finished for %s", consumer.name)
+            self.logger.info("Sender finished", extra={"consumer_name": consumer.name})
 
     async def publish(
         self,
@@ -267,7 +271,7 @@ class JetStreamBroker(
                         if batch <= 0:
                             await anyio.sleep(0.1)
                             continue
-                        self.logger.debug("Fetching %d messages", batch)
+                        self.logger.debug("Fetching messages", extra={"batch": batch})
                         messages = await subscription.fetch(
                             batch=batch,
                             timeout=fetch_timeout,
@@ -284,7 +288,9 @@ class JetStreamBroker(
             with anyio.move_on_after(1, shield=True):
                 if consumer.dynamic:
                     await subscription.unsubscribe()
-            self.logger.info("Stopped sender for consumer: %s", consumer.name)
+            self.logger.info(
+                "Stopped sender for consumer", extra={"consumer_name": consumer.name}
+            )
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         return raw_message.metadata.num_delivered <= self._DEFAULT_MAX_RETRIES

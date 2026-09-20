@@ -697,69 +697,87 @@ def log_context():
     clear_contextvars()
 
 
+@pytest.fixture
+def log_consumer():
+    consumer = MagicMock()
+    consumer.name = "test_consumer"
+    return consumer
+
+
 @pytest.mark.anyio
-async def test_structlog_middleware_binds_message_id(service, ce, log_context):
+async def test_structlog_middleware_binds_message_context(
+    service, ce, log_consumer, log_context
+):
     middleware = StructlogMiddleware(service)
-    await middleware.before_process_message(consumer=MagicMock(), message=ce)
-    assert get_contextvars()["message_id"] == str(ce.id)
+    await middleware.before_process_message(consumer=log_consumer, message=ce)
+    assert get_contextvars() == {
+        "message_id": str(ce.id),
+        "consumer": "test_consumer",
+    }
 
 
 @pytest.mark.anyio
-async def test_structlog_middleware_custom_key(service, ce, log_context):
-    middleware = StructlogMiddleware(service, message_id_key="msg_id")
-    await middleware.before_process_message(consumer=MagicMock(), message=ce)
-    assert get_contextvars() == {"msg_id": str(ce.id)}
+async def test_structlog_middleware_custom_keys(service, ce, log_consumer, log_context):
+    middleware = StructlogMiddleware(
+        service, message_id_key="msg_id", consumer_name_key="handler"
+    )
+    await middleware.before_process_message(consumer=log_consumer, message=ce)
+    assert get_contextvars() == {"msg_id": str(ce.id), "handler": "test_consumer"}
 
 
 @pytest.mark.anyio
 async def test_structlog_middleware_preserves_existing_context(
-    service, ce, log_context
+    service, ce, log_consumer, log_context
 ):
     """Bindings made by the application must survive message processing."""
     middleware = StructlogMiddleware(service)
-    consumer = MagicMock()
     bind_contextvars(request_id="req-1", tenant="acme")
 
-    await middleware.before_process_message(consumer=consumer, message=ce)
+    await middleware.before_process_message(consumer=log_consumer, message=ce)
     assert get_contextvars() == {
         "request_id": "req-1",
         "tenant": "acme",
         "message_id": str(ce.id),
+        "consumer": "test_consumer",
     }
 
-    await middleware.after_process_message(consumer=consumer, message=ce)
+    await middleware.after_message_finalized(consumer=log_consumer, message=ce)
     assert get_contextvars() == {"request_id": "req-1", "tenant": "acme"}
 
 
 @pytest.mark.anyio
-async def test_structlog_middleware_unbinds_message_id(service, ce, log_context):
+async def test_structlog_middleware_unbinds_message_context(
+    service, ce, log_consumer, log_context
+):
     middleware = StructlogMiddleware(service)
-    consumer = MagicMock()
 
-    await middleware.before_process_message(consumer=consumer, message=ce)
-    await middleware.after_process_message(
-        consumer=consumer, message=ce, result=None, exc=None
+    await middleware.before_process_message(consumer=log_consumer, message=ce)
+    await middleware.after_message_finalized(
+        consumer=log_consumer, message=ce, result=None, exc=None
     )
-    assert "message_id" not in get_contextvars()
+    assert get_contextvars() == {}
 
 
 @pytest.mark.anyio
 async def test_structlog_middleware_unbind_without_bind(service, log_context):
     """A message skipped before binding must not break finalization."""
     middleware = StructlogMiddleware(service)
-    await middleware.after_process_message(consumer=MagicMock(), message=None)
-    assert "message_id" not in get_contextvars()
+    await middleware.after_message_finalized(consumer=MagicMock(), message=None)
+    assert get_contextvars() == {}
 
 
 @pytest.mark.anyio
-async def test_structlog_middleware_message_id_in_log_entries(service, ce, log_context):
+async def test_structlog_middleware_context_in_log_entries(
+    service, ce, log_consumer, log_context
+):
     middleware = StructlogMiddleware(service)
-    await middleware.before_process_message(consumer=MagicMock(), message=ce)
+    await middleware.before_process_message(consumer=log_consumer, message=ce)
 
     with capture_logs(processors=[merge_contextvars]) as entries:
         structlog.get_logger(__name__).info("processing")
 
     assert entries[0]["message_id"] == str(ce.id)
+    assert entries[0]["consumer"] == "test_consumer"
 
 
 @pytest.mark.anyio
@@ -784,6 +802,7 @@ async def test_structlog_middleware_bound_while_consumer_runs(service, log_conte
         bound.update(get_contextvars())
 
     consumer = MagicMock()
+    consumer.name = "test_consumer"
     consumer.event_type = CloudEvent
     consumer.decoder = None
     consumer.timeout = None
@@ -794,4 +813,5 @@ async def test_structlog_middleware_bound_while_consumer_runs(service, log_conte
     await service._process(consumer, raw, service.decoder, 10.0)
 
     assert bound["message_id"] == str(message.id)
-    assert "message_id" not in get_contextvars()
+    assert bound["consumer"] == "test_consumer"
+    assert get_contextvars() == {}

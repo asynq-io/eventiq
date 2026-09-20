@@ -103,7 +103,10 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
                     )
                     if message:
                         if message["type"] == "pong":
-                            self.logger.debug("Received pong from pubsub %s", message)
+                            self.logger.debug(
+                                "Received pong from pubsub",
+                                extra={"raw_message": str(message)},
+                            )
                             continue
                         await send_stream.send(message)
                     else:
@@ -139,5 +142,7 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         delay: int | None = None,
     ) -> None:
         if delay is not None:
-            self.logger.warning("delay is not supported expected None got %d", delay)
+            self.logger.warning(
+                "Delay is not supported by this broker", extra={"delay": delay}
+            )
         await self.redis.publish(raw_message["channel"], raw_message["data"])

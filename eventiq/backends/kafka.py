@@ -230,15 +230,19 @@ class KafkaBroker(UrlBroker[ConsumerRecord, None]):
         next assigned, to this consumer or another group member.
         """
         if delay is not None:
-            self.logger.warning("delay is not supported expected None got %d", delay)
+            self.logger.warning(
+                "Delay is not supported by this broker", extra={"delay": delay}
+            )
         subscription = getattr(raw_message, SUBSCRIPTION_ATTR, None)
         if isinstance(subscription, KafkaSubscription):
             self.logger.warning(
-                "Nacked %s[%s] at offset %s: no offset is committed for this "
-                "partition until it is reassigned.",
-                raw_message.topic,
-                raw_message.partition,
-                raw_message.offset,
+                "Nacked message: no offset is committed for this partition "
+                "until it is reassigned.",
+                extra={
+                    "topic": raw_message.topic,
+                    "partition": raw_message.partition,
+                    "offset": raw_message.offset,
+                },
             )
             subscription.nack(raw_message)
 

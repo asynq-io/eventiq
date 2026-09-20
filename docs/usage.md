@@ -312,13 +312,44 @@ from eventiq import Middleware
 
 class LoggingMiddleware(Middleware):
     async def before_process_message(self, *, consumer, message) -> None:
-        self.logger.info("Processing %s on %s", message.id, consumer.name)
+        self.logger.info(
+            "Processing message",
+            extra={"message_id": str(message.id), "consumer_name": consumer.name},
+        )
 
     async def after_process_message(self, *, consumer, message, result=None, exc=None) -> None:
         if exc:
-            self.logger.error("Failed: %s", exc)
+            self.logger.error("Failed to process message", exc_info=exc)
 
 service.add_middleware(LoggingMiddleware)
+```
+
+Eventiq keeps every log message a constant string and passes all variables through
+the standard library's `extra` argument, so the fields arrive as attributes on the
+`LogRecord`. Any structured handler picks them up without eventiq depending on it:
+`structlog.stdlib.ExtraAdder` lifts them into the event dict, and JSON formatters
+such as `python-json-logger` serialise them as top-level keys. Follow the same
+convention in your own middlewares and handlers.
+
+The standard library's own formatter interpolates only the names its format string
+mentions, so those fields would be dropped from a plain console. `eventiq run`
+therefore installs `eventiq.logging.KeyValueFormatter`, which appends whatever
+fields a record carries:
+
+```
+INFO:eventiq.service.Service:Starting consumer task consumer_name='orders' task_index=0
+```
+
+Passing `--log-config` overrides it with your own configuration.
+
+To tag every entry logged while a message is being processed with its `message_id`
+and `consumer`, add `eventiq.middlewares.structlog.StructlogMiddleware` (requires
+`structlog`):
+
+```python
+from eventiq.middlewares.structlog import StructlogMiddleware
+
+service.add_middleware(StructlogMiddleware)
 ```
 
 See the [Middleware reference](reference/middleware.md) for the full list of available hooks and built-in middleware classes.
