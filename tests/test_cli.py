@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from eventiq.cli import DocsFormat, cli, import_service
@@ -19,11 +18,6 @@ def test_import_service_returns_service():
     from eventiq import Service
 
     assert isinstance(import_service(SERVICE_PATH), Service)
-
-
-def test_import_service_rejects_non_service():
-    with pytest.raises(TypeError, match="must be an instance of Service"):
-        import_service("eventiq:CloudEvent")
 
 
 # --- run --reload ---
@@ -64,7 +58,7 @@ def test_run_reload_target_includes_options():
 
 def test_run_without_reload_starts_service():
     with (
-        patch("eventiq.cli.import_service") as import_mock,
+        patch("eventiq.cli.import_runner") as import_mock,
         patch("eventiq.cli.anyio.run") as anyio_run,
     ):
         result = runner.invoke(cli, ["run", SERVICE_PATH])

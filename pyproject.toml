@@ -1,6 +1,6 @@
 [project]
 name = "eventiq"
-version = "2.0.0rc1"
+version = "2.0.0b1"
 description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"

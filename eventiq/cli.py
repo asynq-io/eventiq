@@ -3,9 +3,11 @@ import shlex
 import sys
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import anyio
 import typer
+from typing_extensions import Protocol, runtime_checkable
 
 from .imports import import_from_string
 from .logging import get_logger
@@ -24,13 +26,33 @@ class DocsFormat(str, Enum):
     yaml = "yaml"
 
 
+@runtime_checkable
+class Runnable(Protocol):
+    async def run(self, *args: Any, **kwargs: Any) -> None: ...
+
+
+def import_runner(path: str) -> Runnable:
+    """Import a `Runnable` instance from a `"module:attribute"` path."""
+    if "." not in sys.path:
+        sys.path.insert(0, ".")
+    instance = import_from_string(path)
+    if not isinstance(instance, Runnable):
+        msg = f"Expected a `Runnable` instance, got {type(instance)}"
+        raise TypeError(msg)
+    return instance
+
+
 def import_service(path: str) -> Service:
     """Import a `Service` instance from a `"module:attribute"` path."""
     # The working directory is added here rather than at import time, so merely
     # importing this module does not mutate interpreter state.
     if "." not in sys.path:
         sys.path.insert(0, ".")
-    return import_from_string(path)
+    instance = import_from_string(path)
+    if not isinstance(instance, Service):
+        msg = f"Expected a `Service` instance, got {type(instance)}"
+        raise TypeError(msg)
+    return instance
 
 
 def _build_target_from_opts(
@@ -104,7 +126,7 @@ def run(
         # service would then start a second time in the foreground.
         return
 
-    instance = import_service(service)
+    instance = import_runner(service)
     logger.info("Running service: %s", service)
     anyio.run(
         instance.run,
