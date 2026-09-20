@@ -10,7 +10,14 @@ AnyType = TypeVar("AnyType")
 
 
 def import_from_string(path: str) -> Any:
-    module_name, _, obj = path.partition(":")
+    """Import the object named by `path`, given as `"module:attribute"`."""
+    module_name, separator, obj = path.partition(":")
+    if not separator or not obj:
+        msg = (
+            f"Invalid path {path!r}: expected the format 'module:attribute', "
+            f"e.g. 'myapp.service:service'"
+        )
+        raise ImportError(msg)
     module = importlib.import_module(module_name)
     try:
         return getattr(module, obj)

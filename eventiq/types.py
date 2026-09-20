@@ -1,63 +1,64 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    Concatenate,
     Literal,
-    Optional,
     Protocol,
     TypeVar,
-    Union,
     overload,
     runtime_checkable,
 )
 from uuid import UUID
 
 from pydantic import BaseModel, TypeAdapter
-from typing_extensions import Concatenate, ParamSpec, TypedDict
+from typing_extensions import ParamSpec, TypedDict
 
 if TYPE_CHECKING:
+    from pydantic.config import ExtraValues
+    from pydantic.main import IncEx
+
     from .consumer import GenericConsumer
-    from .middleware import Middleware
+    from .middleware import MiddlewareProtocol
     from .models import CloudEvent, Publishes
     from .service import Service
 
 
-Undefinded: Any = object()
-
-ID = Union[UUID, str]
+ID = UUID | str
 
 Message = TypeVar("Message", bound=Any)
 DefaultAction = Literal["ack", "nack"]
-DecodedMessage = tuple[bytes, Optional[dict[str, str]]]
+DecodedMessage = tuple[bytes, dict[str, str]]
 
 T = TypeVar("T", bound=BaseModel)
-Seconds = Union[int, float]
-Timeout = Union[Seconds, timedelta]
-RawData = Union[str, bytes, bytearray]
+Seconds = int | float
+Timeout = Seconds | timedelta
+RawData = str | bytes
 
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 AnyType: TypeAdapter = TypeAdapter(Any)
-State = dict[Union[type, str], Any]
+State = dict[type | str, Any]
 
 PreparedMessage = tuple[str, bytes, dict[str, Any]]
-Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
+Lifespan = Callable[["Service"], AbstractAsyncContextManager[State | None]]
 
 
 P = ParamSpec("P")
 
-MessageHandler = Union[
-    type["GenericConsumer"], Callable[Concatenate[CloudEventType, P], Any]
-]
+MessageHandler = type["GenericConsumer"] | Callable[Concatenate[CloudEventType, P], Any]
 
 
 class MiddlewareType(Protocol[P]):
     def __call__(
-        self, service: Service, *args: P.args, **kwargs: P.kwargs
-    ) -> Middleware: ...
+        self,
+        service: Service,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> MiddlewareProtocol: ...
 
 
 class Publisher(Protocol):
@@ -87,6 +88,27 @@ class Decoder(Protocol[T]):
 
     @overload
     def decode(self, data: RawData, as_type: None = None) -> Any: ...
+
+
+class DecodeOptions(TypedDict, total=False):
+    strict: bool | None
+    extra: ExtraValues | None
+    context: Any | None
+    by_alias: bool | None
+    by_name: bool | None
+
+
+class EncodeOptions(TypedDict, total=False):
+    include: IncEx
+    exclude: IncEx
+    context: Any | None
+    by_alias: bool
+    exclude_unset: bool
+    exclude_defaults: bool
+    exclude_none: bool
+    round_trip: bool
+    warnings: bool | Literal["none", "warn", "error"]
+    serialize_as_any: bool
 
 
 class Parameter(TypedDict, total=False):

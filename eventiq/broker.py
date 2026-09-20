@@ -12,7 +12,7 @@ from eventiq.exceptions import BrokerConnectionError, BrokerError
 
 from .imports import import_from_string
 from .logging import LoggerMixin
-from .settings import BrokerSettings, UrlBrokerSettings
+from .settings import BrokerSettings
 from .types import ID, DecodedMessage, DefaultAction, Message, Timeout
 from .utils import format_topic, to_float
 
@@ -36,10 +36,15 @@ class BulkMessage(NamedTuple):
 
 
 class Broker(LoggerMixin, ABC, Generic[Message, R]):
-    """Base broker class
-    :param description: Broker (Server) Description
-    :param encoder: Encoder (Serializer) class
-    :param decoder: Decoder (Deserializer) class.
+    """Base broker class.
+
+    :param name: Broker instance name used in AsyncAPI server definitions.
+    :param description: Human-readable broker description.
+    :param default_on_exc: Action taken on unhandled consumer exceptions — ``"nack"`` or ``"ack"``.
+    :param default_consumer_timeout: Default message processing timeout in seconds.
+    :param tags: AsyncAPI tags attached to the broker server.
+    :param asyncapi_extra: Extra fields merged into the AsyncAPI server object.
+    :param validate_error_delay: Nack delay (seconds) applied when message validation fails.
     """
 
     protocol: str
@@ -81,6 +86,7 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
         return type(self).__name__
 
     def should_nack(self, raw_message: Message) -> bool:
+        _ = raw_message
         return False
 
     def format_topic(self, topic: str) -> str:
@@ -100,6 +106,14 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
     def is_connected(self) -> bool:
         """Return broker connection status."""
         raise NotImplementedError
+
+    async def check_health(self) -> bool:
+        """Return whether the broker connection is usable.
+
+        Awaitable so backends can probe the server with a real round-trip, which
+        `is_connected` cannot do: it only reports whether a client was created.
+        """
+        return self.is_connected
 
     @abstractmethod
     async def publish(
@@ -131,7 +145,11 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
                 tg.start_soon(self._publish_task, message_topic, body, headers, kwargs)
 
     async def _publish_task(
-        self, topic: str, body: bytes, headers: dict[str, str], kwargs: dict[str, Any]
+        self,
+        topic: str,
+        body: bytes,
+        headers: dict[str, str],
+        kwargs: dict[str, Any],
     ) -> None:
         await self.publish(topic, body, headers=headers, **kwargs)
 
@@ -165,7 +183,9 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
 
     @classmethod
     def from_settings(
-        cls, settings: BrokerSettings | None = None, **kwargs: Any
+        cls,
+        settings: BrokerSettings | None = None,
+        **kwargs: Any,
     ) -> Broker:
         if settings is None:
             settings = cls.Settings()
@@ -178,11 +198,11 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
         cls,
         **kwargs: Any,
     ) -> Broker:
-        if cls == Broker:
+        if cls is Broker:
             try:
                 type_name = os.environ["BROKER_CLASS"]
             except KeyError:
-                msg = "BROKER_CLASS evironment variable not set"
+                msg = "BROKER_CLASS environment variable not set"
                 raise BrokerError(msg) from None
             broker_cls = import_from_string(type_name)
         else:
@@ -191,7 +211,6 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
 
 
 class UrlBroker(Broker[Message, R], ABC):
-    settings: type[UrlBrokerSettings]
     error_msg = "Broker not connected"
 
     def __init__(

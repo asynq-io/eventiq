@@ -65,12 +65,36 @@ pip install 'eventiq[broker]'
 - Twelve factor app approach - stdout logging, configuration through environment variables
 - Easily extensible via Middlewares
 - Multiple extensions and integrations including:
-  - Prometheus - mertics exporter
-  - OpenTelemetry - tracing and metrics
-  - Message Pack - message pack encoder for messages
-  - FastAPI - integrating eventiq Service with FastAPI applications (WIP)
-  - Dataref - data reference resolver for messages (WIP)
-  - Eventiq Workflows - orchestration engine built on top of eventiq (WIP)
+
+### Prometheus metrics exporter
+
+Source: https://github.com/asynq-io/eventiq-exporter
+
+Installation:
+```shell
+uv add eventiq-exporter
+# or
+pip install eventiq-exporter
+```
+
+### OpenTelemetry instrumentation
+Source: https://github.com/asynq-io/opentelemetry-instrumentation-eventiq
+
+Installation:
+```shell
+uv add opentelemetry-instrumentation-eventiq
+# or
+pip install opentelemetry-instrumentation-eventiq
+```
+
+### FastAPI integration
+ Source: https://github.com/asynq-io/eventiq-fastapi
+Installation
+```shell
+pip install eventiq-fastapi
+# or
+pip install eventiq-fastapi
+```
 
 ## Basic Usage
 
@@ -157,6 +181,41 @@ async def test_my_subscriber():
     assert result == 42
 
 ```
+
+## Running tests
+
+Install the dev dependencies (includes `pytest`, `pytest-xdist`, `testcontainers`, the backend clients and the linters):
+
+```shell
+uv sync --group dev
+```
+
+Run the unit test suite:
+
+```shell
+uv run pytest
+```
+
+Run the tests in parallel across multiple workers with [pytest-xdist](https://pytest-xdist.readthedocs.io):
+
+```shell
+uv run pytest -n auto
+```
+
+The end-to-end suite (`tests/e2e`) runs the whole publish/subscribe + middleware stack against real brokers started as testcontainers Docker containers. It is collected and skipped by a normal `pytest` run, so no container is started unless you opt in:
+
+```shell
+# e2e only (requires a running Docker daemon)
+uv run pytest --e2e ./tests/e2e
+
+# unit suite + e2e
+uv run pytest --e2e
+
+# a single backend
+uv run pytest --e2e --e2e-backends=redis
+```
+
+See [`tests/e2e/README.md`](tests/e2e/README.md) for details.
 
 ## CLI
 

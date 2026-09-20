@@ -38,3 +38,4 @@ site/
 tmp.db
 .python-version
 asyncapi.yaml
+.serena/

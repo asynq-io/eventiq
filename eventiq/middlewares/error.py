@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from eventiq.middleware import CloudEventType, Middleware
 from eventiq.utils import is_async_callable, to_async
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from eventiq import Consumer, Service
 
 
 class ErrorHandlerMiddleware(Middleware[CloudEventType]):
+    """Invokes `callback` whenever processing fails with one of `errors`."""
+
     def __init__(
         self,
         service: Service,
         callback: Callable[[Service, Consumer, CloudEventType, Exception | None], Any],
-        errors: type[Exception] | tuple[type[Exception]] = Exception,
+        errors: type[Exception] | tuple[type[Exception], ...] = Exception,
     ) -> None:
         super().__init__(service)
         if not is_async_callable(callback):
@@ -27,8 +31,8 @@ class ErrorHandlerMiddleware(Middleware[CloudEventType]):
         *,
         consumer: Consumer,
         message: CloudEventType,
-        result: Any | None = None,
         exc: Exception | None = None,
+        **_: Any,
     ) -> None:
         if exc and isinstance(exc, self.exc):
             await self.callback(self.service, consumer, message, exc)

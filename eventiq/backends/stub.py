@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from eventiq.broker import Broker
 from eventiq.settings import BrokerSettings
-from eventiq.utils import utc_now
+from eventiq.utils import get_topic_regex, utc_now
 
 if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
@@ -54,7 +55,7 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         )
         self.wait_on_publish = wait_on_publish
         self._delay_queue: asyncio.Queue[tuple[StubMessage, datetime]] = asyncio.Queue(
-            1000
+            1000,
         )
         self._connected = False
         self._delay_task: asyncio.Task | None = None
@@ -79,7 +80,8 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[StubMessage],
     ) -> None:
-        queue = self.topics[self.format_topic(consumer.topic)]
+        _ = group
+        queue = self.topics[consumer.topic]
         async with send_stream:
             while self._connected:
                 message = await queue.get()
@@ -96,14 +98,20 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
             await asyncio.sleep(0.1)
 
     async def connect(self) -> None:
+        if self._delay_task is not None:
+            return
         self._connected = True
         self._delay_task = asyncio.create_task(self._delay_queue_worker())
         await asyncio.sleep(0)
 
     async def disconnect(self) -> None:
         self._connected = False
-        if self._delay_task:
-            self._delay_task.cancel()
+        task, self._delay_task = self._delay_task, None
+        if task is not None:
+            task.cancel()
+            # Awaited so the worker is really gone before the topics are dropped.
+            with suppress(asyncio.CancelledError):
+                await task
         self.topics.clear()
 
     async def publish(
@@ -112,15 +120,18 @@ class StubBroker(Broker[StubMessage, dict[str, asyncio.Event]]):
         body: bytes,
         *,
         headers: dict[str, str],
-        **kwargs: Any,
+        **_: Any,
     ) -> dict[str, asyncio.Event]:
         response = {}
-        for target_topic, queue in self.topics.items():
-            if re.fullmatch(topic, target_topic):
+        # A snapshot: `self.topics` is a defaultdict senders insert into lazily, and
+        # the awaits below let one register while this loop is suspended.
+        for target_topic, queue in list(self.topics.items()):
+            # The subscribed topic is the pattern, the published topic the subject.
+            if re.fullmatch(get_topic_regex(target_topic), topic):
                 event = asyncio.Event()
                 msg = StubMessage(data=body, queue=queue, event=event, headers=headers)
                 await queue.put(msg)
-                response[topic] = event
+                response[target_topic] = event
                 if self.wait_on_publish:
                     await event.wait()
         return response

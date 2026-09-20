@@ -1,13 +1,9 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "eventiq"
-dynamic = ["version"]
+version = "2.0.0b1"
 description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<4.0"
 license = "Apache-2.0"
 keywords = [
     "python",
@@ -20,18 +16,30 @@ keywords = [
 ]
 authors = [{ name = "RaRhAeu", email = "rarha_eu@protonmail.com" }]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Natural Language :: English",
-    "Framework :: AsyncIO",
     "Operating System :: OS Independent",
-    "Topic :: Software Development :: Libraries",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "anyio>4.0,<5.0",
@@ -39,6 +47,7 @@ dependencies = [
     "pydantic >2.0,<3",
     "pydantic-settings>2.0,<3",
     "pydantic-asyncapi==0.2.1",
+    "typing-extensions>=4.0,<5.0",
 ]
 
 [project.urls]
@@ -46,25 +55,51 @@ Documentation = "https://github.com/asynq-io/eventiq#readme"
 Issues = "https://github.com/asynq-io/eventiq/issues"
 Source = "https://github.com/asynq-io/eventiq"
 
+
+
 [project.scripts]
 eventiq = "eventiq.cli:cli"
 
 [project.optional-dependencies]
-nats = ["nats-py"]
-rabbitmq = ["aio-pika"]
-kafka = ["aiokafka"]
-redis = ["redis"]
+# backends
+nats = ["nats-py>=2.14.0,<3.0"]
+rabbitmq = ["aio-pika>=9.6.1,<10.0"]
+kafka = ["aiokafka>=0.13.0,<2.0"]
+redis = ["redis>=7.2.1,<8.0"]
+# encoders
+msgpack = ["ormsgpack>=1.12.2,<2.0"]
+# observability
+prometheus = ["prometheus-client>=0.26.0"]
+opentelemetry = [
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-instrumentation>=0.65b0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-semantic-conventions>=0.65b0",
+]
+# integrations
+di = ["modern-di>=3.3.0,<4.0"]
+fastapi = ["fastapi>=0.141.1,<1.0"]
 
-[tool.hatch.version]
-path = "eventiq/__about__.py"
+standard = ["eventiq[di,prometheus,opentelemetry]"]
 
-[tool.hatch.envs.default]
-dependencies = [
+[dependency-groups]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "docs"},
+    "ipython",
+    "watchfiles>=1.1.1",
+]
+
+test = [
     "pytest",
-    "pytest-asyncio",
-    "pytest-sugar",
     "pytest-cov",
+    "pytest-sugar",
     "pytest-repeat",
+    "pytest-timeout",
+    "pytest-xdist",
+    "structlog",
+    "modern-di>=3.3,<4",
     "pyyaml",
     "ruff==0.9.4",
     "mypy==1.13.0",
@@ -74,42 +109,69 @@ dependencies = [
     "aio-pika",
     "redis",
     "watchfiles",
+    "testcontainers>=4.15.0",
 ]
 
-[tool.hatch.envs.default.scripts]
-test = "pytest {args:tests}"
-check = [
-    "ruff check ./eventiq",
-    "ruff format --check ./eventiq",
-    "mypy --install-types --non-interactive {args:eventiq tests}",
-    "bandit -r ./eventiq",
+lint = [
+    "mypy",
+    "ruff",
+    "bandit",
+    "types-pyyaml>=6.0.12.20250915",
 ]
+
+docs = [
+    "mkdocs<2.0",
+    "mkdocs-material",
+    "mkdocs-autorefs",
+    "mkdocstrings[python]",
+    "watchdog",
+    "nats-py",
+    "aio-pika",
+    "aiokafka",
+    "redis",
+]
+
+
+[tool.uv.build-backend]
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
 
 [tool.coverage.run]
 source_pkgs = ["eventiq"]
 branch = true
 parallel = true
-omit = ["eventiq/__about__.py"]
 
 [tool.coverage.paths]
 package = ["eventiq"]
 tests = ["tests"]
 
+
 [tool.coverage.report]
-exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-addopts = "--cov=./eventiq"
+timeout = 3
+addopts = "--cov=./eventiq -n auto"
 testpaths = ["./tests"]
 filterwarnings = "ignore::DeprecationWarning"
+markers = [
+    "e2e: runs against a real broker; enabled with --e2e",
+]
 
 [tool.pyright]
-venvPath = ".venv"
-venv = "eventiq"
+venvPath = "."
+venv = ".venv"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
+# strict = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 follow_imports = "normal"
@@ -119,45 +181,36 @@ show_column_numbers = true
 show_error_codes = true
 warn_no_return = false
 warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 
 line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
 select = ["ALL"]
-
 ignore = [
-    "A001",
     "A002",
     "A005",
-    "ARG002",
-    "ARG004",
-    "ASYNC109",
     "ANN401",
+    "ASYNC109",
     "B008",     # do not perform function calls in argument defaults
     "BLE001",
     "COM812",
+    "CPY001",
     "D",
     "E501",     # line too long
-    "FA100",
-    "FBT001",
-    "FBT002",
-    "FBT003",
-    "ISC001",
     "N818",
     "PLC0415",
     "PLR0913",
-    "PLR2004",
     "PTH123",
-    "S108",
 ]
 
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "ANN001", "ANN201"]
+"tests/*" = ["S101", "SLF001", "ANN001", "ANN201", "PLR2004", "ARG001", "ARG002", "ARG004", "TC001"]
 "examples/*" = ["S101", "ANN001", "ANN201", "INP001", "T201"]
 
 [tool.bandit]

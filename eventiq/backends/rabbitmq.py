@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Union
+from typing import TYPE_CHECKING, Annotated, Any
 
 import aio_pika
 from aio_pika.abc import (
@@ -34,7 +34,7 @@ class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
 
 
 class RabbitmqBroker(
-    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]]
+    UrlBroker[AbstractIncomingMessage, ConfirmationFrameType | None],
 ):
     """
     RabbitMQ broker implementation, based on `aio_pika` library.
@@ -80,20 +80,40 @@ class RabbitmqBroker(
         return bool(raw_message.redelivered)
 
     async def connect(self) -> None:
-        self._connection = await aio_pika.connect_robust(
-            self.url, **self.connection_options
+        if self._connection is not None:
+            return
+        connection = await aio_pika.connect_robust(
+            self.url,
+            **self.connection_options,
         )
-        channel = await self.connection.channel()
-        self._exchange = await channel.declare_exchange(
-            name=self.exchange_name, type=aio_pika.ExchangeType.TOPIC, durable=True
-        )
+        # Assign only once the exchange is declared: a failed declaration
+        # (e.g. PRECONDITION_FAILED on a mismatched exchange) would otherwise leave
+        # a connection that reports healthy but can never publish, and the
+        # idempotency guard above would make that state permanent.
+        try:
+            channel = await connection.channel()
+            exchange = await channel.declare_exchange(
+                name=self.exchange_name,
+                type=aio_pika.ExchangeType.TOPIC,
+                durable=True,
+            )
+        except BaseException:
+            with move_on_after(1, shield=True):
+                await connection.close()
+            raise
+        self._connection = connection
+        self._exchange = exchange
 
     async def disconnect(self) -> None:
-        await self.connection.close()
+        if self._connection is None:
+            return
+        connection, self._connection = self._connection, None
+        self._exchange = None
+        await connection.close()
 
     @property
     def is_connected(self) -> bool:
-        return not self.connection.is_closed
+        return self._connection is not None and not self._connection.is_closed
 
     @staticmethod
     def decode_message(raw_message: AbstractIncomingMessage) -> DecodedMessage:
@@ -101,21 +121,31 @@ class RabbitmqBroker(
 
     @staticmethod
     def get_message_metadata(raw_message: AbstractIncomingMessage) -> dict[str, str]:
+        _ = raw_message
         return {}
 
     async def sender(
-        self, group: str, consumer: Consumer, send_stream: MemoryObjectSendStream
+        self,
+        group: str,
+        consumer: Consumer,
+        send_stream: MemoryObjectSendStream,
     ) -> None:
         channel = await self.connection.channel()
-        prefetch_count = consumer.concurrency * 2
-        await channel.set_qos(prefetch_count=prefetch_count)
-        options: dict[str, Any] = consumer.options.get(
-            "queue_options", self.queue_options
+        prefetch_count = consumer.options.get(
+            "prefetch_count",
+            max(consumer.concurrency * 2, self.default_prefetch_count),
         )
+        await channel.set_qos(prefetch_count=prefetch_count)
+        # Copied: the fallback is the shared broker-level dict, and setdefault would
+        # otherwise let the first consumer decide durability for every later one.
+        options: dict[str, Any] = {
+            **consumer.options.get("queue_options", self.queue_options)
+        }
         is_durable = not consumer.dynamic
         options.setdefault("durable", is_durable)
         queue = await channel.declare_queue(name=f"{group}:{consumer.name}", **options)
-        await queue.bind(self.exchange, routing_key=consumer.topic)
+        routing_key = self.format_topic(consumer.topic)
+        await queue.bind(self.exchange, routing_key=routing_key)
         try:
             async with send_stream, queue.iterator() as q:
                 async for message in q:
@@ -124,7 +154,7 @@ class RabbitmqBroker(
         finally:
             with move_on_after(1, shield=True):
                 if consumer.dynamic:
-                    await queue.unbind(self.exchange, routing_key=consumer.topic)
+                    await queue.unbind(self.exchange, routing_key=routing_key)
                 await channel.close()
 
     async def publish(
@@ -140,14 +170,14 @@ class RabbitmqBroker(
         message_source: str,
         timeout: float | None = None,
         mandatory: bool = True,
-        immidiate: bool = False,
+        immediate: bool = False,
         delivery_mode: aio_pika.DeliveryMode = aio_pika.DeliveryMode.PERSISTENT,
         priority: int | None = None,
         correlation_id: str | None = None,
         reply_to: str | None = None,
         expiration: DateType | None = None,
         user_id: str | None = None,
-        **kwargs: Any,
+        **_: Any,
     ) -> ConfirmationFrameType | None:
         msg = aio_pika.Message(
             body,
@@ -169,7 +199,7 @@ class RabbitmqBroker(
             msg,
             routing_key=topic,
             mandatory=mandatory,
-            immediate=immidiate,
+            immediate=immediate,
             timeout=timeout,
         )
 
@@ -177,6 +207,12 @@ class RabbitmqBroker(
         await raw_message.ack()
 
     async def nack(
-        self, raw_message: AbstractIncomingMessage, delay: int | None = None
+        self,
+        raw_message: AbstractIncomingMessage,
+        delay: int | None = None,
     ) -> None:
+        if delay is not None:
+            self.logger.warning(
+                "Delay is not supported by this broker", extra={"delay": delay}
+            )
         await raw_message.reject(requeue=True)

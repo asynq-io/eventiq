@@ -1,13 +1,17 @@
 import logging.config
+import shlex
 import sys
+from collections.abc import Iterable
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import anyio
 import typer
+from typing_extensions import Protocol, runtime_checkable
 
 from .imports import import_from_string
-from .logging import get_logger
+from .logging import KeyValueFormatter, get_logger
 from .models import CloudEvent
 from .service import Service
 
@@ -15,32 +19,69 @@ cli = typer.Typer()
 
 logger = get_logger(__name__, "cli")
 
-if "." not in sys.path:
-    sys.path.insert(0, ".")
+DEFAULT_LOG_FORMAT = "%(levelname)s:%(name)s:%(message)s"
+
+
+class DocsFormat(str, Enum):
+    """Output formats supported by the `docs` command."""
+
+    json = "json"
+    yaml = "yaml"
+
+
+@runtime_checkable
+class Runnable(Protocol):
+    async def run(self, *args: Any, **kwargs: Any) -> None: ...
+
+
+def import_runner(path: str) -> Runnable:
+    """Import a `Runnable` instance from a `"module:attribute"` path."""
+    if "." not in sys.path:
+        sys.path.insert(0, ".")
+    instance = import_from_string(path)
+    if not isinstance(instance, Runnable):
+        msg = f"Expected a `Runnable` instance, got {type(instance)}"
+        raise TypeError(msg)
+    return instance
 
 
 def import_service(path: str) -> Service:
-    service = import_from_string(path)
-    if not isinstance(service, Service):
-        msg = f"Service must be an instance of Service, got {type(service)}"
+    """Import a `Service` instance from a `"module:attribute"` path."""
+    # The working directory is added here rather than at import time, so merely
+    # importing this module does not mutate interpreter state.
+    if "." not in sys.path:
+        sys.path.insert(0, ".")
+    instance = import_from_string(path)
+    if not isinstance(instance, Service):
+        msg = f"Expected a `Service` instance, got {type(instance)}"
         raise TypeError(msg)
-    return service
+    return instance
+
+
+def _log_reload(changes: Iterable[tuple[Any, str]]) -> None:
+    logger.info(
+        "Reloading service",
+        extra={"changed_paths": sorted(path for _, path in changes)},
+    )
 
 
 def _build_target_from_opts(
     service: str,
-    log_level: Optional[str],
-    log_config: Optional[str],
-    use_uvloop: Optional[bool],
-    debug: Optional[bool],
+    log_level: str | None,
+    log_config: str | None,
+    *,
+    use_uvloop: bool | None,
+    debug: bool | None,
 ) -> str:
-    cmd = [f"eventiq run {service}"]
+    # Quoted: the reload child is spawned as a shell command, so a service path or
+    # log config containing spaces would otherwise be split into separate arguments.
+    cmd = ["eventiq", "run", shlex.quote(service)]
     if log_level:
-        cmd.append(f"--log-level={log_level}")
+        cmd.append(f"--log-level={shlex.quote(log_level)}")
     if log_config:
-        cmd.append(f"--log-config={log_config}")
-    if use_uvloop:
-        cmd.append("--use-uvloop")
+        cmd.append(f"--log-config={shlex.quote(log_config)}")
+    if use_uvloop is not None:
+        cmd.append("--use-uvloop" if use_uvloop else "--no-use-uvloop")
     if debug:
         cmd.append("--debug")
     return " ".join(cmd)
@@ -49,18 +90,28 @@ def _build_target_from_opts(
 @cli.command(help="Run service")
 def run(
     service: str,
-    log_level: Optional[str] = typer.Option(
+    *,
+    log_level: str | None = typer.Option(
         None,
         help="Logger level, accepted values are: debug, info, warning, error, critical",
     ),
-    log_config: Optional[str] = typer.Option(
+    log_config: str | None = typer.Option(
         None,
         help="Logging file configuration path.",
     ),
-    use_uvloop: Optional[bool] = typer.Option(None, help="Enable uvloop"),
-    debug: bool = typer.Option(False, help="Enable debug"),
-    reload: Optional[str] = typer.Option(None, help="Hot-reload on provided path"),
+    use_uvloop: bool | None = typer.Option(None, help="Enable uvloop"),
+    debug: bool = typer.Option(default=False, help="Enable debug"),
+    reload: str | None = typer.Option(None, help="Hot-reload on provided path"),
 ) -> None:
+    # Configured before anything else, so the messages below are actually emitted.
+    # The formatter renders the fields eventiq logs through `extra`, which the
+    # stdlib default would drop; an explicit --log-config still overrides it.
+    handler = logging.StreamHandler()
+    handler.setFormatter(KeyValueFormatter(DEFAULT_LOG_FORMAT))
+    logging.basicConfig(level=(log_level or "info").upper(), handlers=[handler])
+    if log_config:
+        logging.config.fileConfig(log_config)
+
     if reload:
         try:
             from watchfiles import run_process
@@ -69,32 +120,30 @@ def run(
                 "--reload option requires 'watchfiles' installed. Please run 'pip install watchfiles'.",
             )
             return
-        logger.info("Watching for changes in: %s", reload)
+        logger.info("Watching for changes", extra={"reload_path": reload})
         target = _build_target_from_opts(
             service,
             log_level,
             log_config,
-            use_uvloop,
-            debug,
+            use_uvloop=use_uvloop,
+            debug=debug,
         )
         run_process(
             reload,
             target=target,
             target_type="command",
-            callback=logger.info,
+            callback=_log_reload,
             sigint_timeout=30,
             sigkill_timeout=30,
         )
+        # run_process returns when the watcher is interrupted; without this the
+        # service would then start a second time in the foreground.
+        return
 
-    if log_level:
-        logging.basicConfig(level=log_level.upper())
-    if log_config:
-        logging.config.fileConfig(log_config)
-    instance = import_service(service)
-    logger.info("Running service: %s", service)
+    instance = import_runner(service)
+    logger.info("Running service", extra={"service_path": service})
     anyio.run(
         instance.run,
-        True,
         backend="asyncio",
         backend_options={"use_uvloop": use_uvloop, "debug": debug},
     )
@@ -140,8 +189,8 @@ def docs(
         help="Global service object to import in format {package}.{module}:{service_object}",
     ),
     out: Path = typer.Option("./asyncapi.json", help="Output file path"),
-    format: str = typer.Option(
-        "json",
+    format: DocsFormat = typer.Option(
+        DocsFormat.json,
         help="Output format. Valid options are 'yaml' and 'json'(default)",
     ),
 ) -> None:
@@ -152,5 +201,5 @@ def docs(
 
     svc = import_service(service)
     spec = get_async_api_spec(svc)
-    save_async_api_to_file(spec, out, format)
+    save_async_api_to_file(spec, out, format.value)
     typer.secho(f"Docs saved successfully to {out}", fg="green")
