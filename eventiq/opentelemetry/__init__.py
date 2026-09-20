@@ -53,7 +53,7 @@ class EventiqInstrumentator(BaseInstrumentor):
             m
             for m in service.middlewares
             if not isinstance(
-                m, (OpentelemetryMetricsMiddleware, OpenTelemetryTracingMiddleware)
+                m, OpentelemetryMetricsMiddleware | OpenTelemetryTracingMiddleware
             )
         ]
 

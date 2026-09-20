@@ -177,7 +177,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
         exc: Exception | None = None,
         **_: Any,
     ) -> None:
-        if exc is None or isinstance(exc, (Retry, Fail, Skip)):
+        if exc is None or isinstance(exc, Retry | Fail | Skip):
             return
 
         retry_strategy = consumer.retry_strategy or self.retry_strategy

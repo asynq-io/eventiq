@@ -182,6 +182,41 @@ async def test_my_subscriber():
 
 ```
 
+## Running tests
+
+Install the dev dependencies (includes `pytest`, `pytest-xdist`, `testcontainers`, the backend clients and the linters):
+
+```shell
+uv sync --group dev
+```
+
+Run the unit test suite:
+
+```shell
+uv run pytest
+```
+
+Run the tests in parallel across multiple workers with [pytest-xdist](https://pytest-xdist.readthedocs.io):
+
+```shell
+uv run pytest -n auto
+```
+
+The end-to-end suite (`tests/e2e`) runs the whole publish/subscribe + middleware stack against real brokers started as testcontainers Docker containers. It is collected and skipped by a normal `pytest` run, so no container is started unless you opt in:
+
+```shell
+# e2e only (requires a running Docker daemon)
+uv run pytest --e2e ./tests/e2e
+
+# unit suite + e2e
+uv run pytest --e2e
+
+# a single backend
+uv run pytest --e2e --e2e-backends=redis
+```
+
+See [`tests/e2e/README.md`](tests/e2e/README.md) for details.
+
 ## CLI
 
 Getting help:

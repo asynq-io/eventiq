@@ -97,6 +97,7 @@ test = [
     "pytest-sugar",
     "pytest-repeat",
     "pytest-timeout",
+    "pytest-xdist",
     "structlog",
     "modern-di>=3.3,<4",
     "pyyaml",
@@ -108,6 +109,7 @@ test = [
     "aio-pika",
     "redis",
     "watchfiles",
+    "testcontainers>=4.15.0",
 ]
 
 lint = [
@@ -156,9 +158,12 @@ exclude_lines = [
 
 [tool.pytest.ini_options]
 timeout = 3
-addopts = "--cov=./eventiq"
+addopts = "--cov=./eventiq -n auto"
 testpaths = ["./tests"]
 filterwarnings = "ignore::DeprecationWarning"
+markers = [
+    "e2e: runs against a real broker; enabled with --e2e",
+]
 
 [tool.pyright]
 venvPath = "."
@@ -188,6 +193,7 @@ indent-width = 4
 select = ["ALL"]
 ignore = [
     "A002",
+    "A005",
     "ANN401",
     "ASYNC109",
     "B008",     # do not perform function calls in argument defaults
@@ -204,7 +210,7 @@ ignore = [
 
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "SLF001", "ANN001", "ANN201", "PLR2004", "ARG001", "ARG002", "ARG004"]
+"tests/*" = ["S101", "SLF001", "ANN001", "ANN201", "PLR2004", "ARG001", "ARG002", "ARG004", "TC001"]
 "examples/*" = ["S101", "ANN001", "ANN201", "INP001", "T201"]
 
 [tool.bandit]

@@ -30,11 +30,7 @@ def import_service(path: str) -> Service:
     # importing this module does not mutate interpreter state.
     if "." not in sys.path:
         sys.path.insert(0, ".")
-    service = import_from_string(path)
-    if not isinstance(service, Service):
-        msg = f"Service must be an instance of Service, got {type(service)}"
-        raise TypeError(msg)
-    return service
+    return import_from_string(path)
 
 
 def _build_target_from_opts(

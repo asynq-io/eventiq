@@ -32,7 +32,7 @@ class NatsSettings(UrlBrokerSettings[NatsUrl]):
 
 
 class JetStreamSettings(NatsSettings):
-    jetstream_options: dict[str, Any] = Field({})
+    jetstream_options: dict[str, Any] = Field(default_factory=dict)
     poll_interval: NonNegativeFloat = 0.0
     heartbeat: NonNegativeFloat = 0.1
 

@@ -62,9 +62,7 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         super().__init__(**kwargs)
         self.poll_timeout = poll_timeout
         self.poll_interval = poll_interval
-        self._redis: Redis | None = redis or Redis.from_url(
-            self.url, **self.connection_options
-        )
+        self._redis: Redis | None = redis
 
     @staticmethod
     def decode_message(raw_message: RedisRawMessage) -> DecodedMessage:
@@ -119,7 +117,10 @@ class RedisBroker(UrlBroker[RedisRawMessage, None]):
         self._redis = None
 
     async def connect(self) -> None:
-        self.redis.ping()
+        if self._redis is None:
+            self._redis = Redis.from_url(self.url, **self.connection_options)
+        # `ping` is typed for both the sync and async clients.
+        await cast("Awaitable[bool]", self._redis.ping())
 
     async def publish(
         self,

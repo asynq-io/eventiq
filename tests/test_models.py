@@ -1,4 +1,5 @@
 import inspect
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -254,3 +255,125 @@ def test_validate_cloud_event_sets_type_from_class():
 
     e = MyNamedEvent(data="x", type="")
     assert e.type == "MyNamedEvent"
+
+
+# --- explicit event type declaration ---
+
+
+def test_type_class_kwarg_sets_default():
+    class OrganizationCreatedEvent(
+        CloudEvent[dict],
+        topic="events.organization",
+        type="events.organization.created",
+    ):
+        pass
+
+    assert OrganizationCreatedEvent.get_default_type() == "events.organization.created"
+    e = OrganizationCreatedEvent(data={})
+    assert e.type == "events.organization.created"
+
+
+def test_type_class_kwarg_rejects_other_value():
+    class OrganizationCreatedEvent(
+        CloudEvent[dict],
+        topic="events.organization",
+        type="events.organization.created",
+    ):
+        pass
+
+    with pytest.raises(ValidationError):
+        OrganizationCreatedEvent(data={}, type="events.organization.deleted")
+
+
+def test_type_literal_annotation_sets_default():
+    class OrganizationCreatedEvent(CloudEvent[dict], topic="events.organization"):
+        type: Literal["events.organization.created"]
+
+    assert OrganizationCreatedEvent.get_default_type() == "events.organization.created"
+    e = OrganizationCreatedEvent(data={})
+    assert e.type == "events.organization.created"
+    assert e.model_dump()["type"] == "events.organization.created"
+
+    with pytest.raises(ValidationError):
+        OrganizationCreatedEvent(data={}, type="com.example.other")
+
+
+def test_type_literal_annotation_inherited_from_abstract_base():
+    class OrganizationEvent(CloudEvent[dict], abstract=True):
+        type: Literal["events.organization.created"]
+
+    class OrganizationCreatedEvent(OrganizationEvent, topic="events.organization"):
+        pass
+
+    assert OrganizationCreatedEvent(data={}).type == "events.organization.created"
+
+
+def test_type_multi_value_literal_stays_required():
+    class OrganizationEvent(CloudEvent[dict], topic="events.organization"):
+        type: Literal["events.organization.created", "events.organization.deleted"]
+
+    assert OrganizationEvent.get_default_type() is None
+    with pytest.raises(ValidationError):
+        OrganizationEvent(data={})
+    assert (
+        OrganizationEvent(data={}, type="events.organization.deleted").type
+        == "events.organization.deleted"
+    )
+
+
+def test_type_not_leaked_between_siblings_of_same_parametrization():
+    class SiblingWithType(Event[dict], topic="siblings.a", type="events.sibling.a"): ...
+
+    class SiblingWithoutType(Event[dict], topic="siblings.b"): ...
+
+    assert SiblingWithType.get_default_type() == "events.sibling.a"
+    assert SiblingWithoutType.get_default_type() is None
+    assert SiblingWithoutType(data={}).type == "SiblingWithoutType"
+
+
+def test_default_type_of_plain_cloud_event():
+    assert CloudEvent.get_default_type() is None
+
+
+@pytest.mark.parametrize("value", [123, {"a": 1}])
+def test_non_string_type_rejected(value):
+    with pytest.raises(ValidationError, match="Type must be a non-empty string"):
+        CloudEvent(data="x", topic="t", type=value)
+
+
+def test_required_non_literal_type_stays_required():
+    class OrganizationEvent(CloudEvent[dict], topic="events.organization"):
+        type: str
+
+    assert OrganizationEvent.get_default_type() is None
+    with pytest.raises(ValidationError):
+        OrganizationEvent(data={})
+
+
+# --- field aliases ---
+
+
+def test_topic_serialized_under_subject_alias():
+    class AliasedEvent(CloudEvent[dict], topic="events.aliased"): ...
+
+    e = AliasedEvent(data={})
+    assert e.model_dump(by_alias=True)["subject"] == "events.aliased"
+    assert e.model_dump()["topic"] == "events.aliased"
+
+
+@pytest.mark.parametrize("key", ["topic", "subject"])
+def test_topic_accepts_field_name_and_alias(key):
+    class AliasedEvent(CloudEvent[dict], topic="events.aliased"): ...
+
+    assert AliasedEvent.model_validate({key: "events.aliased", "data": {}}).topic == (
+        "events.aliased"
+    )
+
+
+@pytest.mark.parametrize("key", ["content_type", "datacontenttype"])
+def test_content_type_accepts_field_name_and_alias(key):
+    ce = CloudEvent.model_validate(
+        {"subject": "t", "data": {}, key: "application/json"}
+    )
+    assert ce.content_type == "application/json"
+    assert ce.model_dump(by_alias=True)["datacontenttype"] == "application/json"

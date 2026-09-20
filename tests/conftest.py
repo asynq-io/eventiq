@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import anyio
@@ -18,6 +19,50 @@ from eventiq.middlewares.perf_counter import PerfCounterMiddleware
 from eventiq.middlewares.rate_limits import RateLimitMiddleware
 from eventiq.middlewares.retries import RetryMiddleware
 from eventiq.utils import utc_now
+from tests.e2e.backends import BACKENDS
+
+E2E_DIR = Path(__file__).parent / "e2e"
+
+# The first test of a backend pays for pulling and starting its container,
+# which the 3s timeout of the unit suite is far too tight for.
+E2E_TIMEOUT = 300
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the ``--e2e`` options.
+
+    Defined in the top-level conftest so the option is recognised no matter how
+    pytest is invoked (``pytest --e2e`` without a path, ``pytest tests/e2e``,
+    ``pytest -m e2e``, ...). A nested conftest's ``pytest_addoption`` is only
+    loaded once its directory is collected, so ``pytest --e2e`` alone would fail.
+    """
+    group = parser.getgroup("eventiq")
+    group.addoption(
+        "--e2e",
+        action="store_true",
+        default=False,
+        help="Run the e2e suite against real brokers instead of skipping it.",
+    )
+    group.addoption(
+        "--e2e-backends",
+        default=",".join(BACKENDS),
+        metavar="NAMES",
+        help=f"Comma separated e2e backends, out of {', '.join(BACKENDS)}.",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Mark the e2e tests, and skip them unless ``--e2e`` was given."""
+    skip_e2e = pytest.mark.skip(reason="e2e suite disabled; run it with --e2e")
+    for item in items:
+        if E2E_DIR not in item.path.parents:
+            continue
+        item.add_marker("e2e")
+        item.add_marker(pytest.mark.timeout(E2E_TIMEOUT))
+        if not config.getoption("e2e"):
+            item.add_marker(skip_e2e)
 
 
 @pytest.fixture(autouse=True, scope="session")

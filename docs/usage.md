@@ -53,6 +53,37 @@ class OrderCreated(CloudEvent[OrderPayload], topic="orders.created"):
 
 The generic type parameter is the type of the `data` field and can be any pydantic-compatible type.
 
+### Event type
+
+The `type` attribute defaults to the class name. Per the CloudEvents spec it is a producer
+defined string, often a reverse-DNS name carrying a version, so it can be declared
+explicitly with the `type` class keyword argument:
+
+```python
+class OrderCreated(
+    CloudEvent[OrderPayload],
+    topic="orders.created",
+    type="com.example.order.created.v1",
+):
+    pass
+```
+
+The declared value becomes the field default and the only accepted value, so messages of
+another type fail validation when decoded into this class.
+
+The same can be expressed by annotating the field with a `Literal`, which is useful when
+the type is part of an explicitly declared schema:
+
+```python
+class OrderCreated(CloudEvent[OrderPayload], topic="orders.created"):
+    type: Literal["com.example.order.created.v1"]
+```
+
+A single valued `Literal` is used as the field default, so `type` does not have to be passed
+when creating a message. Type checkers cannot see that default, so assign it as well
+(`type: Literal["..."] = "..."`) if you construct the event without passing `type`.
+Annotating multiple values keeps the field required, restricted to those values.
+
 ---
 
 ## Subscribing

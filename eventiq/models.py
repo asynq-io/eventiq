@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar, get_args, get_origin
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -19,6 +19,42 @@ from .utils import TOPIC_SPECIAL_CHARS, get_annotation, get_topic_regex, utc_now
 D = TypeVar("D", bound=Any)
 
 
+def _get_topic_field(topic: str, *, validate_topic: bool) -> FieldInfo:
+    kw: _FieldInfoInputs = {
+        "validation_alias": "subject",
+        "serialization_alias": "subject",
+        "description": "Message subject",
+        "validate_default": True,
+        "default": topic,
+    }
+    if any(k in topic for k in TOPIC_SPECIAL_CHARS):
+        kw["annotation"] = str
+        if validate_topic:
+            kw["pattern"] = get_topic_regex(topic)
+    else:
+        kw["annotation"] = get_annotation(topic)
+    return FieldInfo(**kw)
+
+
+def _get_type_field(type: str) -> FieldInfo:
+    kw: _FieldInfoInputs = {
+        "annotation": get_annotation(type),
+        "default": type,
+        "description": "Event type",
+        "validate_default": True,
+    }
+    return FieldInfo(**kw)
+
+
+def _get_literal_value(annotation: Any) -> str | None:
+    """Return the only allowed value of a single-valued `Literal[...]` annotation."""
+    if get_origin(annotation) is Literal:
+        args = get_args(annotation)
+        if len(args) == 1 and isinstance(args[0], str):
+            return args[0]
+    return None
+
+
 class CloudEvent(BaseModel, Generic[D]):
     """Base Schema for all messages."""
 
@@ -31,23 +67,33 @@ class CloudEvent(BaseModel, Generic[D]):
 
     service: ClassVar[ServiceContext] = ServiceContext()
 
-    specversion: str = Field("1.0", description="CloudEvents specification version")
+    specversion: str = Field(
+        default="1.0", description="CloudEvents specification version"
+    )
     content_type: str | None = Field(
-        None,
-        alias="datacontenttype",
+        default=None,
+        validation_alias="datacontenttype",
+        serialization_alias="datacontenttype",
         description="Message content type",
     )
     id: UUID = Field(default_factory=uuid4, description="Event ID", repr=True)
     time: datetime = Field(default_factory=utc_now, description="Event created time")
     topic: str = Field(
-        "",
-        alias="subject",
+        default="",
+        validation_alias="subject",
+        serialization_alias="subject",
         description="Message subject (topic)",
     )
-    type: str = Field("", description="Event type")
-    source: str | None = Field(None, description="Event source (app)")
+    # Annotated as `Any` so subclasses can narrow it to a `Literal`; the JSON schema
+    # keeps declaring a string, as required by the CloudEvents spec.
+    type: Any = Field(
+        default="",
+        description="Event type",
+        json_schema_extra={"type": "string"},
+    )
+    source: str | None = Field(default=None, description="Event source (app)")
     data: D = Field(description="Event payload")
-    dataschema: str | None = Field(None, description="Data schema URI")
+    dataschema: str | None = Field(default=None, description="Data schema URI")
 
     _raw: Any | None = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
@@ -57,6 +103,7 @@ class CloudEvent(BaseModel, Generic[D]):
         *,
         abstract: bool = False,
         topic: str | None = None,
+        type: str | None = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -68,34 +115,33 @@ class CloudEvent(BaseModel, Generic[D]):
         *,
         abstract: bool = False,
         topic: str | None = None,
+        type: str | None = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__pydantic_init_subclass__(**kwargs)
-        if not abstract and topic:
-            kw: _FieldInfoInputs = {
-                "alias": "subject",
-                "description": "Message subject",
-                "validate_default": True,
-            }
-            if any(k in topic for k in TOPIC_SPECIAL_CHARS):
-                kw.update(
-                    {
-                        "annotation": str,
-                        "default": topic,
-                    },
-                )
-                if validate_topic:
-                    kw["pattern"] = get_topic_regex(topic)
-            else:
-                kw.update(
-                    {
-                        "annotation": get_annotation(topic),
-                        "default": topic,
-                    },
-                )
+        if abstract:
+            return
 
-            cls.model_fields["topic"] = FieldInfo(**kw)
+        fields: dict[str, FieldInfo] = {}
+        if topic:
+            fields["topic"] = _get_topic_field(topic, validate_topic=validate_topic)
+        if type:
+            fields["type"] = _get_type_field(type)
+        else:
+            # `type: Literal["events.organization.created"]` declared in the class
+            # body is a complete definition, so fill in the implied default.
+            type_field = cls.model_fields["type"]
+            if type_field.is_required():
+                value = _get_literal_value(type_field.annotation)
+                if value is not None:
+                    fields["type"] = FieldInfo.merge_field_infos(
+                        type_field,
+                        default=value,
+                    )
+
+        if fields:
+            cls.model_fields.update(fields)
             cls.model_rebuild(force=True)
 
     def __eq__(self, other: object) -> bool:
@@ -116,11 +162,19 @@ class CloudEvent(BaseModel, Generic[D]):
             self.topic = topic
         if not self.type:
             self.type = type(self).__name__
+        elif not isinstance(self.type, str):
+            msg = "Type must be a non-empty string"
+            raise ValueError(msg)
         return self
 
     @classmethod
     def get_default_topic(cls) -> str | None:
         return cls.model_fields["topic"].get_default()
+
+    @classmethod
+    def get_default_type(cls) -> str | None:
+        default = cls.model_fields["type"].get_default()
+        return default if isinstance(default, str) and default else None
 
     @property
     def raw(self) -> Any:

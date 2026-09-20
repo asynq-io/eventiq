@@ -27,7 +27,7 @@ SUBSCRIPTION_ATTR = "eventiq_subscription"
 
 
 class KafkaSettings(UrlBrokerSettings[KafkaUrl]):
-    consumer_options: dict[str, Any] = Field({})
+    consumer_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class PartitionOffsets:

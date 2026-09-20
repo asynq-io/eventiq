@@ -1656,16 +1656,19 @@ def test_redis_decode_message():
 @pytest.mark.anyio
 async def test_redis_connect():
     mock_redis = MagicMock()
+    mock_redis.ping = AsyncMock(return_value=True)
     with patch("eventiq.backends.redis.Redis.from_url", return_value=mock_redis):
         broker = RedisBroker(url="redis://localhost:6379")
         await broker.connect()
         assert broker._redis is mock_redis
+        mock_redis.ping.assert_awaited_once()
 
 
 @pytest.mark.anyio
 async def test_redis_connect_is_idempotent():
     """Replacing a live client would leak its connection pool's sockets."""
     mock_redis = MagicMock()
+    mock_redis.ping = AsyncMock(return_value=True)
     with patch(
         "eventiq.backends.redis.Redis.from_url", return_value=mock_redis
     ) as from_url:
