@@ -426,7 +426,7 @@ wheels = [
 
 [[package]]
 name = "eventiq"
-version = "2.0.0rc1"
+version = "2.0.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
