@@ -814,4 +814,51 @@ async def test_structlog_middleware_bound_while_consumer_runs(service, log_conte
 
     assert bound["message_id"] == str(message.id)
     assert bound["consumer"] == "test_consumer"
+
+
+# --- PrometheusMiddleware ---
+
+
+@pytest.mark.anyio
+async def test_prometheus_middleware_observes_a_plausible_duration(service):
+    """`elapsed` (seconds) must reach the histogram scaled to milliseconds.
+
+    Regression test for 1.3: the middleware used to keep its own start-time
+    registry keyed by `id(message)`, unbounded and never popped on paths where
+    `before_process_message` fires but the finalize hook does not.
+    """
+    import asyncio
+
+    from eventiq import CloudEvent
+    from eventiq.backends.stub import StubMessage
+    from eventiq.middlewares.prometheus import PrometheusMiddleware
+
+    middleware = PrometheusMiddleware(service, prefix=f"test_{id(service)}")
+    service.middlewares.append(middleware)
+
+    message = CloudEvent.new({}, type="TestEvent", topic="test_topic", source="s")
+    raw = StubMessage(
+        data=service.encoder.encode(message),
+        queue=asyncio.Queue(),
+        event=asyncio.Event(),
+        headers={},
+    )
+
+    async def process(_message) -> None:
+        await anyio.sleep(0.01)
+
+    consumer = MagicMock()
+    consumer.name = "test_consumer"
+    consumer.event_type = CloudEvent
+    consumer.decoder = None
+    consumer.timeout = None
+    consumer.options = {}
+    consumer.process = process
+    service.broker.ack = AsyncMock()
+
+    await service._process(consumer, raw, service.decoder, 10.0)
+
+    labels = (service.name, "test_consumer")
+    observed_ms = middleware.message_durations.labels(*labels)._sum.get()
+    assert 0 < observed_ms < 60_000
     assert get_contextvars() == {}

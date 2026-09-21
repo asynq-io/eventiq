@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import Any, ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
@@ -896,7 +897,7 @@ async def test_failing_after_ack_hook_does_not_nack(finalization_setup):
     svc.add_middleware(BrokenMiddleware)
 
     await svc._handle_message_finalization_with_fallback(
-        consumer, message, result=None, exc=None
+        consumer, message, result=None, exc=None, start_time=perf_counter()
     )
 
     svc.broker.ack.assert_called_once_with(message.raw)
@@ -917,7 +918,7 @@ async def test_failing_after_nack_hook_does_not_nack_twice(finalization_setup):
     svc.add_middleware(BrokenMiddleware)
 
     await svc._handle_message_finalization_with_fallback(
-        consumer, message, result=None, exc=Retry(delay=5)
+        consumer, message, result=None, exc=Retry(delay=5), start_time=perf_counter()
     )
 
     svc.broker.nack.assert_called_once_with(message.raw, 5)

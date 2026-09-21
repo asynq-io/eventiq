@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from eventiq.middleware import Middleware
 
 if TYPE_CHECKING:
-    from eventiq import CloudEvent, Consumer, Service
+    from eventiq import Consumer, Service
     from eventiq.exceptions import Retry
 
 from prometheus_client import (
@@ -61,7 +60,6 @@ class PrometheusMiddleware(Middleware):
         self.run_server = run_server
         self.buckets = buckets
         self.server_port = server_port
-        self.message_start_times: dict[int, int] = {}
         self.prefix = prefix
         self.http_server_options = http_server_options
 
@@ -115,35 +113,24 @@ class PrometheusMiddleware(Middleware):
             buckets=self.buckets,
         )
 
-    @staticmethod
-    def current_millis() -> int:
-        return time.monotonic_ns() // 1000
-
     def format(self, value: str) -> str:
         return f"{self.prefix}_{value}" if self.prefix else value
 
-    async def before_process_message(
-        self, *, consumer: Consumer, message: CloudEvent
-    ) -> None:
+    async def before_process_message(self, *, consumer: Consumer, **_: Any) -> None:
         labels = (self.service.name, consumer.name)
         self.in_progress.labels(*labels).inc()
-        self.message_start_times[id(message)] = self.current_millis()
 
     async def after_message_finalized(
         self,
         *,
         consumer: Consumer,
-        message: CloudEvent,
+        elapsed: float = 0.0,
         **_: Any,
     ) -> None:
         labels = (self.service.name, consumer.name)
         self.in_progress.labels(*labels).dec()
         self.total_messages.labels(*labels).inc()
-        message_start_time = self.message_start_times.pop(
-            id(message), self.current_millis()
-        )
-        message_duration = self.current_millis() - message_start_time
-        self.message_durations.labels(*labels).observe(message_duration)
+        self.message_durations.labels(*labels).observe(elapsed * 1000)
 
     async def after_retry_message(
         self,

@@ -7,6 +7,7 @@ import socket
 import sys
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, ClassVar, Generic
 
 import anyio
@@ -252,6 +253,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         **kwargs: Any,
     ) -> R:
         """Encode and publish `message`, returning the broker's response."""
+        start_time = perf_counter()
         await self.dispatch_before("publish", message=message, **kwargs)
         message_topic, body, message_kwargs = self.prepare_message(
             message,
@@ -268,7 +270,12 @@ class Service(LoggerMixin, Generic[Message, R]):
             headers=message.headers,
             **message_kwargs,
         )
-        await self.dispatch_after("publish", message=message, **kwargs)
+        await self.dispatch_after(
+            "publish",
+            message=message,
+            elapsed=perf_counter() - start_time,
+            **kwargs,
+        )
         return res
 
     def bulk_publish_sync(
@@ -305,7 +312,9 @@ class Service(LoggerMixin, Generic[Message, R]):
         **kwargs: Any,
     ) -> None:
         bulk_messages: list[BulkMessage] = []
+        start_times: list[float] = []
         for message in messages:
+            start_times.append(perf_counter())
             await self.dispatch_before("publish", message=message, **kwargs)
             message_topic, body, message_kwargs = self.prepare_message(
                 message,
@@ -321,8 +330,13 @@ class Service(LoggerMixin, Generic[Message, R]):
 
         await self.broker.bulk_publish(bulk_messages, topic=topic)
 
-        for message in messages:
-            await self.dispatch_after("publish", message=message, **kwargs)
+        for message, start_time in zip(messages, start_times, strict=True):
+            await self.dispatch_after(
+                "publish",
+                message=message,
+                elapsed=perf_counter() - start_time,
+                **kwargs,
+            )
 
     async def connect(self) -> None:
         await self.dispatch_before("broker_connect")
@@ -631,6 +645,7 @@ class Service(LoggerMixin, Generic[Message, R]):
                 )
                 return
 
+            start_time = perf_counter()
             try:
                 await self.dispatch_before(
                     "process_message",
@@ -654,7 +669,7 @@ class Service(LoggerMixin, Generic[Message, R]):
                 raise
             finally:
                 await self._handle_message_finalization_with_fallback(
-                    consumer, message, result, exc
+                    consumer, message, result, exc, start_time
                 )
         finally:
             reset_current_service(token)
@@ -665,6 +680,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         message: CloudEvent,
         result: Any,
         exc: Exception | None,
+        start_time: float,
     ) -> None:
         try:
             await self._handle_message_finalization(consumer, message, result, exc)
@@ -693,6 +709,7 @@ class Service(LoggerMixin, Generic[Message, R]):
                     message=message,
                     result=result,
                     exc=exc,
+                    elapsed=perf_counter() - start_time,
                 )
 
     async def _handle_message_finalization(

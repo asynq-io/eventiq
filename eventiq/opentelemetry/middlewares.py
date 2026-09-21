@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -195,18 +194,11 @@ class OpentelemetryMetricsMiddleware(Middleware[CloudEvent]):
         self.message_durations = self.meter.create_histogram(
             self.format("messages_duration"), "Message processing durations"
         )
-        self.message_start_times: dict[tuple[str, ID], int] = {}
 
     def format(self, value: str) -> str:
         return f"{self.prefix}_{value}" if self.prefix else value
 
-    @staticmethod
-    def current_millis() -> int:
-        return time.monotonic_ns() // 1000
-
-    async def before_process_message(
-        self, *, consumer: Consumer, message: CloudEvent
-    ) -> None:
+    async def before_process_message(self, *, consumer: Consumer, **_: Any) -> None:
         self.in_progress.add(
             1,
             {
@@ -214,13 +206,12 @@ class OpentelemetryMetricsMiddleware(Middleware[CloudEvent]):
                 "consumer": consumer.name,
             },
         )
-        self.message_start_times[(consumer.name, message.id)] = self.current_millis()
 
-    async def after_process_message(
+    async def after_message_finalized(
         self,
         *,
         consumer: Consumer,
-        message: CloudEvent,
+        elapsed: float = 0.0,
         **_: Any,
     ) -> None:
         attributes = {
@@ -228,10 +219,7 @@ class OpentelemetryMetricsMiddleware(Middleware[CloudEvent]):
             "consumer": consumer.name,
         }
         self.in_progress.add(-1, attributes)
-        message_start_time = self.message_start_times.pop(
-            (consumer.name, message.id), self.current_millis()
-        )
-        self.message_durations.record(message_start_time, attributes)
+        self.message_durations.record(elapsed, attributes)
         self.total.add(1, attributes)
 
     async def after_publish(self, **_: Any) -> None:

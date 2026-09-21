@@ -90,6 +90,7 @@ class MiddlewareProtocol(Protocol[CloudEventType]):
         self,
         *,
         message: CloudEventType,
+        elapsed: float = 0.0,
         **kwargs: Any,
     ) -> None:
         """Called after message is published."""
@@ -146,6 +147,8 @@ class MiddlewareProtocol(Protocol[CloudEventType]):
         message: CloudEventType,
         result: Any = None,
         exc: Exception | None = None,
+        elapsed: float = 0.0,
+        **_: Any,
     ) -> None:
         """Called after message finalized (after ack/nack). Use for context cleanup."""
 
