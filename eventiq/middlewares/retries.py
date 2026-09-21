@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Generic, NamedTuple
+from typing import TYPE_CHECKING, Any, Generic
 
 from eventiq.exceptions import Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
@@ -14,11 +14,6 @@ if TYPE_CHECKING:
 
 
 DelayGenerator = Callable[[CloudEventType, Exception], int]
-
-
-class MessageStatus(NamedTuple):
-    status: str
-    delay: int | None
 
 
 def expo(factor: int = 1) -> DelayGenerator:
