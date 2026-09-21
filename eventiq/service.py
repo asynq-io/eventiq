@@ -374,7 +374,44 @@ class Service(LoggerMixin, Generic[Message, R]):
             await self.dispatch_after("consumer_start", consumer=consumer)
 
     async def run(self, *, enable_signal_handler: bool = True) -> None:
-        """Connect, start every consumer, and block until cancelled or signalled."""
+        """Connect, start every consumer, and block until cancelled or signalled.
+
+        Consumer sender/receiver tasks never return on their own, so with any
+        consumer registered this blocks until a signal (or external cancellation)
+        stops it. With none registered, the inner task group has nothing left to
+        wait on and this returns immediately, after `disconnect`.
+        """
+        async with self._running(enable_signal_handler=enable_signal_handler):
+            pass
+
+    @asynccontextmanager
+    async def context(
+        self, *, enable_signal_handler: bool = False
+    ) -> AsyncGenerator[None]:
+        """Run the service for the duration of the block, then shut it down."""
+        async with self._running(enable_signal_handler=enable_signal_handler) as tg:
+            try:
+                yield
+            finally:
+                # Sender/receiver tasks never return on their own, so leaving the
+                # task group would block forever and `disconnect` would never run.
+                # Announce the shutdown first, exactly as `watch_for_signals` does
+                # - unless that is who cancelled us, and already announced it.
+                if not tg.cancel_scope.cancel_called:
+                    await self.dispatch_before("close_consumers")
+                tg.cancel_scope.cancel()
+
+    @asynccontextmanager
+    async def _running(
+        self, *, enable_signal_handler: bool
+    ) -> AsyncGenerator[TaskGroup]:
+        """Connect, start every consumer, and yield the consumers' task group.
+
+        Shared setup/teardown for `run` and `context`, which differ only in what
+        they do with that task group once consumers are started: `run` lets it
+        run to its natural end (cancellation or, with no consumers, immediately);
+        `context` yields control to the caller's block and then cancels it.
+        """
         # Ambient before the lifespan runs and until after disconnect, so that
         # `run` and `context` expose an identical window to user code.
         with current_service(self):
@@ -397,45 +434,7 @@ class Service(LoggerMixin, Generic[Message, R]):
                                         self.watch_for_signals, tg.cancel_scope
                                     )
                                 await self.start_consumers(tg)
-                        finally:
-                            background_tg.cancel_scope.cancel()
-                finally:
-                    self._background_tg = None
-                    with anyio.move_on_after(5, shield=True):
-                        await self.disconnect()
-
-    @asynccontextmanager
-    async def context(
-        self, *, enable_signal_handler: bool = False
-    ) -> AsyncGenerator[None]:
-        """Run the service for the duration of the block, then shut it down."""
-        with current_service(self):
-            async with self.lifespan(self) as state:
-                if state:
-                    self.state.update(state)
-                try:
-                    async with anyio.create_task_group() as background_tg:
-                        self._background_tg = background_tg
-                        await self.connect()
-                        try:
-                            async with anyio.create_task_group() as tg:
-                                if enable_signal_handler:
-                                    tg.start_soon(
-                                        self.watch_for_signals, tg.cancel_scope
-                                    )
-                                await self.start_consumers(tg)
-                                try:
-                                    yield
-                                finally:
-                                    # Sender/receiver tasks never return on their
-                                    # own, so leaving the task group would block
-                                    # forever and `disconnect` would never run.
-                                    # Announce the shutdown first, exactly as
-                                    # `watch_for_signals` does - unless that is who
-                                    # cancelled us, and already announced it.
-                                    if not tg.cancel_scope.cancel_called:
-                                        await self.dispatch_before("close_consumers")
-                                    tg.cancel_scope.cancel()
+                                yield tg
                         finally:
                             background_tg.cancel_scope.cancel()
                 finally:
