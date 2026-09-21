@@ -181,6 +181,10 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
     def get_num_delivered(self, raw_message: Message) -> int | None:
         return getattr(raw_message, "num_delivered", None)
 
+    def get_message_metadata(self, raw_message: Message) -> dict[str, Any]:
+        _ = raw_message
+        return {}
+
     @classmethod
     def from_settings(
         cls,

@@ -92,7 +92,7 @@ class OpenTelemetryTracingMiddleware(Middleware[TraceContextCloudEvent]):
         self, *, consumer: Consumer, message: TraceContextCloudEvent
     ) -> None:
         trace_ctx = extract(message, getter=eventiq_getter)
-        extra = self.service.broker.get_message_metadata(message.raw)  # type: ignore[attr-defined]
+        extra = self.service.broker.get_message_metadata(message.raw)
         span_name = f"{consumer.name} receive"
         span_attributes = self._get_span_attributes(message, **extra)
         num_delivered = self.service.broker.get_num_delivered(message.raw) or 0
