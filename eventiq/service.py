@@ -716,11 +716,16 @@ class Service(LoggerMixin, Generic[Message, R]):
                 exc=exc,
             )
         except Exception as e:
-            # Keep the consumer's own exception as the routing decision: a failing
-            # after-hook must not silently reclassify a Retry/Skip/Fail outcome.
-            self.logger.exception("Error dispatching after process_message.")
-            if exc is None:
-                exc = e
+            # A control-flow exception raised by an after-hook (e.g. RetryMiddleware)
+            # is a deliberate routing decision and must win over the consumer's own
+            # exception; anything else is a hook bug and is logged, not routed.
+            cf = find_control_flow_exception(e)
+            if cf is not None:
+                exc = cf
+            else:
+                self.logger.exception("Error dispatching after process_message.")
+                if exc is None:
+                    exc = e
 
         if exc is None:
             await self.ack(consumer, message.raw)

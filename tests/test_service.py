@@ -23,6 +23,7 @@ from eventiq.context import (
 from eventiq.dependencies import resolved_func
 from eventiq.exceptions import DecodeError, Fail, Retry, Skip
 from eventiq.middleware import Middleware
+from eventiq.middlewares.retries import MaxRetries
 
 
 def test_service(service: Service):
@@ -967,9 +968,106 @@ async def test_retry_raised_in_nested_task_group_is_honoured(service: Service):
     assert retry_exc.delay == 30
 
 
+# --- RetryMiddleware's routing decision must actually reach the broker (1.1) ---
+
+
+@pytest.mark.anyio
+async def test_retry_middleware_decision_reaches_broker_nack(service: Service):
+    """A plain exception raised by a handler must be retried through the broker.
+
+    Regression test: `RetryMiddleware.after_process_message` raises `Retry` to
+    signal its decision, but `_handle_message_finalization` used to discard any
+    exception raised while dispatching `after_process_message`, so `broker.nack`
+    was always called with `delay=None` and `after_retry_message` never fired.
+    """
+    retried: list[Exception] = []
+
+    class RecordingMiddleware(Middleware):
+        async def after_retry_message(self, *, exc: Exception, **_: Any) -> None:
+            retried.append(exc)
+
+    service.add_middleware(RecordingMiddleware)
+    service.broker.ack = AsyncMock()  # type: ignore[method-assign]
+    service.broker.nack = AsyncMock()  # type: ignore[method-assign]
+
+    async def handler(message: CloudEvent) -> None:
+        msg = "boom"
+        raise ValueError(msg)
+
+    consumer = FnConsumer(
+        fn=handler, event_type=CloudEvent, topic="test_topic", name="retry_consumer"
+    )
+    ce: CloudEvent = CloudEvent.new({}, type="T", topic="test_topic", source="s")
+    raw = StubMessage(
+        data=service.encoder.encode(ce),
+        queue=asyncio.Queue(),
+        event=asyncio.Event(),
+        headers={},
+    )
+
+    await service._process(consumer, raw, service.decoder, 10.0)
+
+    service.broker.ack.assert_not_called()
+    service.broker.nack.assert_called_once()
+    (_, delay), _ = service.broker.nack.call_args
+    assert delay is not None
+    assert len(retried) == 1
+
+
+@pytest.mark.anyio
+async def test_retry_middleware_exhausted_fails_acks_and_publishes_to_dlx(
+    service: Service,
+):
+    """Once the retry strategy gives up, the message must be `Fail`ed, not silently dropped.
+
+    Exercises the same seam as above for the exhaustion path: `Fail` must reach
+    `ack` (not `nack`) and `DeadLetterQueueMiddleware` (installed by default on
+    the `service` fixture) must publish it to the dead letter topic.
+    """
+    service.broker.ack = AsyncMock()  # type: ignore[method-assign]
+    service.broker.nack = AsyncMock()  # type: ignore[method-assign]
+    service.broker.publish = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+    async def handler(message: CloudEvent) -> None:
+        msg = "boom"
+        raise ValueError(msg)
+
+    consumer = FnConsumer(
+        fn=handler,
+        event_type=CloudEvent,
+        topic="test_topic",
+        name="exhausted_consumer",
+        retry_strategy=MaxRetries(max_retries=-1),
+    )
+    ce: CloudEvent = CloudEvent.new({}, type="T", topic="test_topic", source="s")
+    raw = StubMessage(
+        data=service.encoder.encode(ce),
+        queue=asyncio.Queue(),
+        event=asyncio.Event(),
+        headers={},
+    )
+
+    await service._process(consumer, raw, service.decoder, 10.0)
+
+    service.broker.nack.assert_not_called()
+    service.broker.ack.assert_called_once()
+    service.broker.publish.assert_called_once()
+    assert (
+        service.broker.publish.call_args[1]["headers"]["exc-reason"]
+        == "Retry limit exceeded"
+    )
+
+
 @pytest.mark.anyio
 async def test_several_control_flow_exceptions_are_a_plain_failure(service: Service):
-    """A group stating both `Retry` and `Skip` states no outcome: default action wins."""
+    """A group stating both `Retry` and `Skip` states no outcome: default action wins.
+
+    Isolated from `RetryMiddleware` (installed by the `service` fixture): once the
+    ambiguous group falls through as a plain exception, `RetryMiddleware` would
+    apply its own (unrelated) retry policy to it, which is not what this test
+    is pinning down.
+    """
+    service.middlewares.clear()
     service.broker.ack = AsyncMock()  # type: ignore[method-assign]
     service.broker.nack = AsyncMock()  # type: ignore[method-assign]
     service.default_action = AsyncMock()
