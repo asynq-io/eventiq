@@ -151,6 +151,9 @@ class Broker(LoggerMixin, ABC, Generic[Message, R]):
     async def nack(self, raw_message: Message, delay: int | None = None) -> None:
         raise NotImplementedError
 
+    async def on_receive(self, raw_message: Message) -> None:
+        return
+
     @abstractmethod
     async def sender(
         self,

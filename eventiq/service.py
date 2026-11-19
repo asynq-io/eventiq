@@ -3,8 +3,9 @@ from __future__ import annotations
 import functools
 import os
 import signal
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic
+from typing import TYPE_CHECKING, Any, ClassVar, Generic
 
 import anyio
 from anyio import CancelScope, create_memory_object_stream, from_thread
@@ -246,7 +247,7 @@ class Service(LoggerMixin, Generic[Message, R]):
             consumer.maybe_set_publisher(self.publish)
             await self.dispatch_before("consumer_start", consumer=consumer)
             send_stream, receive_stream = create_memory_object_stream[Any](
-                consumer.concurrency,
+                consumer.options.get("buffer_size", consumer.concurrency),
             )
 
             tg.start_soon(self.broker.sender, self.name, consumer, send_stream)
@@ -365,7 +366,7 @@ class Service(LoggerMixin, Generic[Message, R]):
         message: Message,
         delay: int | None = None,
     ) -> None:
-        await self.dispatch_after(
+        await self.dispatch_before(
             "nack",
             consumer=consumer,
             raw_message=message,
@@ -408,6 +409,7 @@ class Service(LoggerMixin, Generic[Message, R]):
             return
 
         try:
+            await self.broker.on_receive(raw_message)
             await self.dispatch_before(
                 "process_message",
                 consumer=consumer,
@@ -476,6 +478,11 @@ class Service(LoggerMixin, Generic[Message, R]):
 
         if exc is None:
             await self.ack(consumer, message.raw)
+            return
+
+        if isinstance(exc, ConsumerCancelledError):
+            with anyio.CancelScope(shield=True):
+                await self.nack(consumer, message.raw)
             return
 
         if isinstance(exc, Retry):

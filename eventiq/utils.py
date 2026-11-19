@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import functools
 import re
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Literal,
+    TypeGuard,
     TypeVar,
     cast,
     get_type_hints,
@@ -18,7 +18,7 @@ from typing import (
 from urllib.parse import urlparse
 
 from anyio import to_thread
-from typing_extensions import ParamSpec, TypeGuard
+from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
     from eventiq.types import Timeout
