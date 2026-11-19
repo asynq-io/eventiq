@@ -15,7 +15,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
     name: "Python ${{ matrix.python-version }}"
     runs-on: ubuntu-latest
     steps:
@@ -28,8 +28,5 @@ jobs:
       - name: Ruff
         if: matrix.python-version == '3.12'
         run: hatch run default:check
-      - name: Install types bacport
-        if: matrix.python-version == '3.9'
-        run: pip install eval-type-backport
       - name: Pytest
         run: hatch run default:test

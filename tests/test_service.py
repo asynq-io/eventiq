@@ -1,8 +1,11 @@
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from eventiq import CloudEvent, Service
+import pytest
+
+from eventiq import CloudEvent, Consumer, Service
 from eventiq.backends.stub import StubBroker
+from eventiq.exceptions import ConsumerCancelledError
 
 
 def test_service(service: Service):
@@ -30,3 +33,45 @@ async def test_bulk_publish(
     for message in messages:
         assert message.headers["Content-Type"] == "application/json"
         assert message.source == running_service.name
+
+
+async def test_nack_dispatches_before_and_after_once(
+    service: Service, test_consumer: Consumer
+) -> None:
+    service.broker.nack = AsyncMock()  # type: ignore[method-assign]
+    service.dispatch_before = AsyncMock()  # type: ignore[method-assign]
+    service.dispatch_after = AsyncMock()  # type: ignore[method-assign]
+    raw_message = MagicMock()
+
+    await service.nack(test_consumer, raw_message, delay=5)
+
+    service.dispatch_before.assert_awaited_once_with(
+        "nack", consumer=test_consumer, raw_message=raw_message
+    )
+    service.dispatch_after.assert_awaited_once_with(
+        "nack", consumer=test_consumer, raw_message=raw_message
+    )
+    service.broker.nack.assert_awaited_once_with(raw_message, delay=5)
+
+
+async def test_cancelled_message_nacked_without_retry(
+    service: Service, test_consumer: Consumer, ce: CloudEvent
+) -> None:
+    service.broker.nack = AsyncMock()  # type: ignore[method-assign]
+    ce.set_context(service, MagicMock(), {})
+
+    await service._handle_message_finalization(
+        test_consumer, ce, None, ConsumerCancelledError("Consumer cancelled")
+    )
+
+    service.broker.nack.assert_awaited_once_with(ce.raw, delay=None)
+
+
+@pytest.mark.parametrize("buffer_size", [-1, 1.5])
+def test_invalid_buffer_size_rejected(
+    service: Service, handler: Any, buffer_size: float
+) -> None:
+    with pytest.raises(ValueError, match="Buffer size"):
+        service.subscribe(
+            handler, topic="test_topic", name="buffered", buffer_size=buffer_size
+        )

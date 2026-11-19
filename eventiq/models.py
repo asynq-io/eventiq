@@ -10,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic.fields import FieldInfo, _FieldInfoInputs
+from pydantic.fields import FieldInfo
 from typing_extensions import Self
 
 from .types import Parameter
@@ -26,7 +26,7 @@ class CloudEvent(BaseModel, Generic[D]):
     """Base Schema for all messages."""
 
     specversion: str = Field("1.0", description="CloudEvents specification version")
-    content_type: Optional[str] = Field(
+    content_type: str | None = Field(
         None,
         alias="datacontenttype",
         description="Message content type",
@@ -40,23 +40,23 @@ class CloudEvent(BaseModel, Generic[D]):
         validate_default=True,
     )
     type: str = Field("", description="Event type", validate_default=True)
-    source: Optional[str] = Field(None, description="Event source (app)")
+    source: str | None = Field(None, description="Event source (app)")
     data: D = Field(..., description="Event payload")
-    dataschema: Optional[AnyUrl] = Field(None, description="Data schema URI")
+    dataschema: AnyUrl | None = Field(None, description="Data schema URI")
 
-    _raw: Optional[Any] = PrivateAttr(None)
+    _raw: Any | None = PrivateAttr(None)
     _headers: dict[str, str] = PrivateAttr({})
     _service: Optional["Service"] = PrivateAttr(None)
 
     def __init_subclass__(
         cls,
         abstract: bool = False,
-        topic: Optional[str] = None,
+        topic: str | None = None,
         validate_topic: bool = False,
         **kwargs: Any,
     ) -> None:
         if not abstract and topic:
-            kw: _FieldInfoInputs = {
+            kw: dict[str, Any] = {
                 "alias": "subject",
                 "description": "Message subject",
                 "validate_default": True,
@@ -98,7 +98,7 @@ class CloudEvent(BaseModel, Generic[D]):
         return str(self)
 
     @classmethod
-    def get_default_topic(cls) -> Optional[str]:
+    def get_default_topic(cls) -> str | None:
         return cls.model_fields["topic"].get_default()
 
     @field_validator("type", mode="before")
@@ -144,7 +144,7 @@ class CloudEvent(BaseModel, Generic[D]):
 
     @classmethod
     def new(
-        cls, obj: D, *, headers: Optional[dict[str, str]] = None, **kwargs: Any
+        cls, obj: D, *, headers: dict[str, str] | None = None, **kwargs: Any
     ) -> Self:
         self = cls(data=obj, **kwargs)
         if headers:

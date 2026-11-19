@@ -1,23 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    Concatenate,
     Literal,
-    Optional,
     Protocol,
     TypeVar,
-    Union,
     overload,
     runtime_checkable,
 )
 from uuid import UUID
 
 from pydantic import BaseModel, TypeAdapter
-from typing_extensions import Concatenate, ParamSpec, TypedDict
+from typing_extensions import ParamSpec, TypedDict
 
 if TYPE_CHECKING:
     from .consumer import GenericConsumer
@@ -28,30 +27,28 @@ if TYPE_CHECKING:
 
 Undefinded: Any = object()
 
-ID = Union[UUID, str]
+ID = UUID | str
 
 Message = TypeVar("Message", bound=Any)
 DefaultAction = Literal["ack", "nack"]
-DecodedMessage = tuple[bytes, Optional[dict[str, str]]]
+DecodedMessage = tuple[bytes, dict[str, str] | None]
 
 T = TypeVar("T", bound=BaseModel)
-Seconds = Union[int, float]
-Timeout = Union[Seconds, timedelta]
-RawData = Union[str, bytes, bytearray]
+Seconds = int | float
+Timeout = Seconds | timedelta
+RawData = str | bytes | bytearray
 
 CloudEventType = TypeVar("CloudEventType", bound="CloudEvent")
 AnyType: TypeAdapter = TypeAdapter(Any)
-State = dict[Union[type, str], Any]
+State = dict[type | str, Any]
 
 PreparedMessage = tuple[str, bytes, dict[str, Any]]
-Lifespan = Callable[["Service"], AbstractAsyncContextManager[Optional[State]]]
+Lifespan = Callable[["Service"], AbstractAsyncContextManager[State | None]]
 
 
 P = ParamSpec("P")
 
-MessageHandler = Union[
-    type["GenericConsumer"], Callable[Concatenate[CloudEventType, P], Any]
-]
+MessageHandler = type["GenericConsumer"] | Callable[Concatenate[CloudEventType, P], Any]
 
 
 class MiddlewareType(Protocol[P]):
