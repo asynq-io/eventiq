@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC
-from typing import TYPE_CHECKING, Annotated, Any, Callable
+from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
 from nats.aio.client import Client
@@ -10,7 +10,7 @@ from nats.aio.msg import Msg as NatsMsg
 from nats.errors import TimeoutError as NatsTimeoutError
 from nats.js import JetStreamContext, api
 from nats.js.api import ConsumerConfig
-from nats.js.errors import KeyNotFoundError
+from nats.js.errors import APIError, KeyNotFoundError, NotFoundError
 from pydantic import AnyUrl, Field, NonNegativeFloat, UrlConstraints
 
 from eventiq.broker import R, UrlBroker
@@ -20,7 +20,7 @@ from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from eventiq.types import ID, DecodedMessage
 
@@ -192,6 +192,7 @@ class JetStreamBroker(
         self.poll_interval = poll_interval
         self.heartbeat = heartbeat
         self._kv: KeyValue | None = None
+        self._held: dict[str, dict[str, NatsMsg]] = {}
 
     async def init_storage(self) -> None:
         self._kv = await self.js.create_key_value(**self.kv_options)
@@ -232,56 +233,189 @@ class JetStreamBroker(
             await self.flush()
         return response
 
+    async def ack(self, raw_message: NatsMsg) -> None:
+        try:
+            if not raw_message.is_acked:
+                await raw_message.ack()
+        finally:
+            self._release(raw_message)
+
+    async def nack(self, raw_message: NatsMsg, delay: int | None = None) -> None:
+        try:
+            if not raw_message.is_acked:
+                await raw_message.nak(delay=delay)
+        finally:
+            self._release(raw_message)
+
+    def _release(self, raw_message: NatsMsg) -> None:
+        for held in self._held.values():
+            held.pop(raw_message.reply, None)
+
     async def sender(
         self,
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream,
     ) -> None:
+        timeout = to_float(consumer.timeout) or self.default_consumer_timeout
         config_kwargs: dict[str, Any] = {
             "name": f"{group}:{consumer.name}",
-            "ack_wait": (to_float(consumer.timeout) or self.default_consumer_timeout)
-            + 30,
+            "ack_wait": timeout + 30,
             "max_ack_pending": 10_000,
         }
+        explicit_fields = {"ack_wait", "max_ack_pending"}
         for key in ConsumerConfig.__dataclass_fields__:
             if key in consumer.options:
                 config_kwargs[key] = consumer.options[key]
+                explicit_fields.add(key)
         config = ConsumerConfig(**config_kwargs)
+        in_progress_interval = self._get_in_progress_interval(consumer, timeout)
         fetch_timeout = consumer.options.get("fetch_timeout", 10)
         heartbeat = consumer.options.get("heartbeat", self.heartbeat)
         poll_interval = consumer.options.get("poll_interval", self.poll_interval)
+        subject = self.format_topic(consumer.topic)
         durable = None if consumer.dynamic else f"{group}:{consumer.name}"
+        stream = None
+        if durable:
+            stream = await self.js.find_stream_name_by_subject(subject)
+            await self._sync_consumer_config(
+                stream=stream,
+                durable=durable,
+                config=config,
+                fields=explicit_fields - {"name", "durable_name"},
+            )
         subscription = await self.js.pull_subscribe(
-            subject=self.format_topic(consumer.topic),
+            subject=subject,
             durable=durable,
+            stream=stream,
             config=config,
         )
+        held: dict[str, NatsMsg] = {}
+        held_key = f"{group}:{consumer.name}"
+        self._held[held_key] = held
         try:
-            async with send_stream:
-                while True:
-                    try:
-                        batch = consumer.concurrency - len(
-                            send_stream._state.buffer  # noqa: SLF001
-                        )
-                        if batch == 0:
-                            await asyncio.sleep(0.1)
-                            continue
-                        self.logger.debug("Fetching %d messages", batch)
-                        messages = await subscription.fetch(
-                            batch=batch,
-                            timeout=fetch_timeout,
-                            heartbeat=heartbeat,
-                        )
-                        for message in messages:
-                            await send_stream.send(message)
-                    except NatsTimeoutError:
-                        self.logger.debug("Suppressing nats timeout error")
-                    await asyncio.sleep(poll_interval)
+            async with anyio.create_task_group() as tg:
+                if in_progress_interval is not None:
+                    tg.start_soon(
+                        self._send_in_progress,
+                        consumer.name,
+                        held,
+                        in_progress_interval,
+                    )
+                async with send_stream:
+                    while True:
+                        try:
+                            stats = send_stream.statistics()
+                            batch = stats.tasks_waiting_receive + (
+                                stats.max_buffer_size - stats.current_buffer_used
+                            )
+                            if batch <= 0:
+                                await asyncio.sleep(0.1)
+                                continue
+                            self.logger.debug("Fetching %d messages", batch)
+                            messages = await subscription.fetch(
+                                batch=int(batch),
+                                timeout=fetch_timeout,
+                                heartbeat=heartbeat,
+                            )
+                            for message in messages:
+                                held[message.reply] = message
+                                await send_stream.send(message)
+                        except NatsTimeoutError:
+                            self.logger.debug("Suppressing nats timeout error")
+                        await asyncio.sleep(poll_interval)
         finally:
-            if consumer.dynamic:
-                await subscription.unsubscribe()
+            buffered_count = send_stream.statistics().current_buffer_used
+            buffered = list(held.values())[len(held) - buffered_count :]
+            with anyio.move_on_after(5, shield=True):
+                await self._nack_buffered(consumer.name, buffered)
+                if consumer.dynamic:
+                    await subscription.unsubscribe()
+            self._held.pop(held_key, None)
             self.logger.info("Stopped sender for consumer: %s", consumer.name)
+
+    @staticmethod
+    def _get_in_progress_interval(consumer: Consumer, timeout: float) -> float | None:
+        ack_wait = to_float(consumer.options.get("ack_wait"))
+        interval = to_float(consumer.options.get("in_progress_interval"))
+        if ack_wait is None or ack_wait >= timeout:
+            if interval is not None:
+                msg = (
+                    f"Consumer {consumer.name}: in_progress_interval requires "
+                    f"ack_wait lower than timeout ({timeout})"
+                )
+                raise ValueError(msg)
+            return None
+        if interval is None:
+            interval = ack_wait / 2
+        if not 0 < interval < ack_wait:
+            msg = (
+                f"Consumer {consumer.name}: in_progress_interval must be greater "
+                f"than 0 and lower than ack_wait ({ack_wait})"
+            )
+            raise ValueError(msg)
+        return interval
+
+    async def _sync_consumer_config(
+        self, *, stream: str, durable: str, config: ConsumerConfig, fields: set[str]
+    ) -> None:
+        try:
+            info = await self.js.consumer_info(stream, durable)
+        except NotFoundError:
+            return
+        changes = {
+            field: getattr(config, field)
+            for field in sorted(fields)
+            if getattr(info.config, field) != getattr(config, field)
+        }
+        if not changes:
+            return
+        try:
+            await self.js.add_consumer(stream, info.config.evolve(**changes))
+        except APIError:
+            self.logger.warning(
+                "Could not update consumer %s with %s, keeping its current config",
+                durable,
+                changes,
+                exc_info=True,
+            )
+            return
+        self.logger.info("Updated consumer %s with %s", durable, changes)
+
+    async def _send_in_progress(
+        self, consumer_name: str, held: dict[str, NatsMsg], interval: float
+    ) -> None:
+        last_beat = anyio.current_time()
+        while True:
+            await anyio.sleep(interval)
+            now = anyio.current_time()
+            delay = now - last_beat - interval
+            if delay > interval:
+                self.logger.warning(
+                    "In-progress for consumer %s sent %.1f seconds late, "
+                    "the event loop was blocked",
+                    consumer_name,
+                    delay,
+                )
+            last_beat = now
+            for message in list(held.values()):
+                if message.is_acked:
+                    continue
+                try:
+                    await message.in_progress()
+                except Exception:
+                    self.logger.exception(
+                        "In-progress failed for consumer %s", consumer_name
+                    )
+
+    async def _nack_buffered(self, consumer_name: str, buffered: list[NatsMsg]) -> None:
+        for message in buffered:
+            try:
+                await self.nack(message)
+            except Exception:  # noqa: PERF203
+                self.logger.exception(
+                    "Nack on shutdown failed for consumer %s", consumer_name
+                )
 
     def should_nack(self, raw_message: NatsMsg) -> bool:
         return raw_message.metadata.num_delivered <= 3

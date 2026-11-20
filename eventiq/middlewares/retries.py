@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Callable, Generic, NamedTuple
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple
 
-from eventiq.exceptions import Fail, Retry, Skip
+from eventiq.exceptions import ConsumerCancelledError, Fail, Retry, Skip
 from eventiq.logging import LoggerMixin
 from eventiq.middleware import CloudEventType, Middleware
 
@@ -176,7 +176,7 @@ class RetryMiddleware(Middleware[CloudEventType]):
         exc: Exception | None = None,
         **_: Any,
     ) -> None:
-        if exc is None or isinstance(exc, (Retry, Fail, Skip)):
+        if exc is None or isinstance(exc, Retry | Fail | Skip | ConsumerCancelledError):
             return
 
         retry_strategy = consumer.retry_strategy or self.retry_strategy
