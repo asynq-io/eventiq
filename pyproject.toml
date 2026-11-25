@@ -7,7 +7,7 @@ name = "eventiq"
 dynamic = ["version"]
 description = "Publish/Subscribe asyncio framework for Python"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 keywords = [
     "python",
@@ -28,10 +28,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 dependencies = [
     "anyio>4.0,<5.0",
@@ -50,7 +52,7 @@ Source = "https://github.com/asynq-io/eventiq"
 eventiq = "eventiq.cli:cli"
 
 [project.optional-dependencies]
-nats = ["nats-py"]
+nats = ["nats-py>=2.10.0"]
 rabbitmq = ["aio-pika"]
 kafka = ["aiokafka"]
 redis = ["redis"]
@@ -69,7 +71,7 @@ dependencies = [
     "ruff==0.9.4",
     "mypy==1.13.0",
     "bandit",
-    "nats-py",
+    "nats-py>=2.10.0",
     "aiokafka",
     "aio-pika",
     "redis",
@@ -121,7 +123,7 @@ warn_no_return = false
 warn_unused_ignores = true
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 
 line-length = 88
 indent-width = 4
@@ -157,7 +159,7 @@ ignore = [
 
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "ANN001", "ANN201"]
+"tests/*" = ["S101", "ANN001", "ANN201", "SLF001"]
 "examples/*" = ["S101", "ANN001", "ANN201", "INP001", "T201"]
 
 [tool.bandit]

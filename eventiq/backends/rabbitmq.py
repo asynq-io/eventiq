@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Union
+from typing import TYPE_CHECKING, Annotated, Any
 
 import aio_pika
 from aio_pika.abc import (
@@ -9,7 +9,6 @@ from aio_pika.abc import (
     AbstractRobustConnection,
     DateType,
 )
-from aiormq.abc import ConfirmationFrameType
 from anyio import move_on_after
 from pydantic import AnyUrl, UrlConstraints
 
@@ -19,6 +18,7 @@ from eventiq.settings import UrlBrokerSettings
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from aio_pika.abc import PublishResultType
     from anyio.streams.memory import MemoryObjectSendStream
 
     from eventiq import Consumer
@@ -33,9 +33,7 @@ class RabbitMQSettings(UrlBrokerSettings[RabbitmqUrl]):
     exchange_name: str = "default"
 
 
-class RabbitmqBroker(
-    UrlBroker[AbstractIncomingMessage, Union[ConfirmationFrameType, None]]
-):
+class RabbitmqBroker(UrlBroker[AbstractIncomingMessage, "PublishResultType | None"]):
     """
     RabbitMQ broker implementation, based on `aio_pika` library.
     :param default_prefetch_count: default number of messages to prefetch (per queue)
@@ -148,7 +146,7 @@ class RabbitmqBroker(
         expiration: DateType | None = None,
         user_id: str | None = None,
         **kwargs: Any,
-    ) -> ConfirmationFrameType | None:
+    ) -> PublishResultType | None:
         msg = aio_pika.Message(
             body,
             headers=dict(headers),

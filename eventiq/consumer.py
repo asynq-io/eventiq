@@ -6,14 +6,14 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    Concatenate,
     Generic,
     overload,
 )
 from uuid import uuid4
 
 import anyio
-from typing_extensions import Concatenate, Unpack
+from typing_extensions import Unpack
 
 from .dependencies import resolved_func
 from .logging import get_logger
@@ -21,7 +21,7 @@ from .types import CloudEventType, P, RetryStrategy
 from .utils import is_async_callable, resolve_message_type_hint, to_async, to_float
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from anyio.streams.memory import MemoryObjectSendStream
 
@@ -69,6 +69,12 @@ class Consumer(ABC, Generic[CloudEventType]):
             raise ValueError(msg)
         if concurrency < 1:
             msg = "Concurrency must be greater than 0"
+            raise ValueError(msg)
+        buffer_size = options.get("buffer_size")
+        if buffer_size is not None and (
+            not isinstance(buffer_size, int) or not 0 <= buffer_size <= concurrency
+        ):
+            msg = f"Buffer size must be an integer between 0 and concurrency ({concurrency})"
             raise ValueError(msg)
         self.name = name
         self.event_type = event_type
