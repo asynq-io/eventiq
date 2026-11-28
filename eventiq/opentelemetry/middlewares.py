@@ -17,7 +17,7 @@ from opentelemetry.trace import (
 )
 
 from eventiq.middleware import Middleware
-from eventiq.models import CloudEvent
+from eventiq.middlewares.metrics import MetricsMiddleware
 
 from .model import TraceContextCloudEvent
 from .version import __version__
@@ -161,108 +161,69 @@ class OpenTelemetryTracingMiddleware(Middleware[TraceContextCloudEvent]):
             activation.__exit__(None, None, None)
 
 
-class OpentelemetryMetricsMiddleware(Middleware[CloudEvent]):
+class OpentelemetryMetricsMiddleware(MetricsMiddleware):
     def __init__(
         self,
         service: Service,
         meter_provider: MeterProvider | None = None,
         prefix: str = "eventiq",
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> None:
-        super().__init__(service, **kwargs)
-        self.prefix = prefix
+        super().__init__(service, prefix=prefix)
         self.meter = get_meter("eventiq", __version__, meter_provider)
         self.in_progress = self.meter.create_up_down_counter(
             self.format("messages_in_progress"),
-            "Total number of messages being processed",
-        )
-        self.total = self.meter.create_counter(
-            self.format("messages_total"), "Total number of messages processed"
-        )
-        self.total_skipped = self.meter.create_counter(
-            self.format("messages_skipped"), "Total number of messages skipped"
-        )
-        self.total_failed = self.meter.create_counter(
-            self.format("messages_failed"), "Total number of messages failed"
-        )
-        self.total_retried = self.meter.create_counter(
-            self.format("messages_retried"), "Total number of errored messages"
+            description="Total number of messages being processed",
         )
         self.total_published = self.meter.create_counter(
-            self.format("messages_published"), "Total number of messages published"
+            self.format("messages_published"),
+            description="Total number of messages published",
+        )
+        self.total = self.meter.create_counter(
+            self.format("messages_total"),
+            description="Total number of messages processed",
+        )
+        self.total_skipped = self.meter.create_counter(
+            self.format("messages_skipped"),
+            description="Total number of messages skipped",
+        )
+        self.total_retried = self.meter.create_counter(
+            self.format("messages_retried"),
+            description="Total number of errored messages",
+        )
+        self.total_errored = self.meter.create_counter(
+            self.format("messages_errored"),
+            description="Total number of errored messages",
+        )
+        self.total_failed = self.meter.create_counter(
+            self.format("messages_failed"),
+            description="Total number of messages failed",
         )
         self.message_durations = self.meter.create_histogram(
-            self.format("messages_duration"), "Message processing durations"
+            self.format("messages_duration"),
+            unit="s",
+            description="Message processing durations",
         )
-
-    def format(self, value: str) -> str:
-        return f"{self.prefix}_{value}" if self.prefix else value
-
-    async def before_process_message(self, *, consumer: Consumer, **_: Any) -> None:
-        self.in_progress.add(
-            1,
-            {
-                "service": self.service.name,
-                "consumer": consumer.name,
-            },
-        )
-
-    async def after_message_finalized(
-        self,
-        *,
-        consumer: Consumer,
-        elapsed: float = 0.0,
-        **_: Any,
-    ) -> None:
-        attributes = {
-            "service": self.service.name,
-            "consumer": consumer.name,
+        self._counters = {
+            "total": self.total,
+            "skipped": self.total_skipped,
+            "retried": self.total_retried,
+            "errored": self.total_errored,
+            "failed": self.total_failed,
         }
-        self.in_progress.add(-1, attributes)
-        self.message_durations.record(elapsed, attributes)
-        self.total.add(1, attributes)
 
-    async def after_publish(self, **_: Any) -> None:
-        self.total_published.add(1, {"service": self.service.name})
+    def _inc(self, metric: str, consumer: str | None = None, value: int = 1) -> None:
+        attributes = {"service": self.service.name}
+        if consumer is not None:
+            attributes["consumer"] = consumer
+        if metric == "in_progress":
+            self.in_progress.add(value, attributes)
+        elif metric == "published":
+            self.total_published.add(value, attributes)
+        else:
+            self._counters[metric].add(value, attributes)
 
-    async def after_skip_message(
-        self,
-        *,
-        consumer: Consumer,
-        **_: Any,
-    ) -> None:
-        self.total_skipped.add(
-            1,
-            {
-                "service": self.service.name,
-                "consumer": consumer.name,
-            },
-        )
-
-    async def after_fail_message(
-        self,
-        *,
-        consumer: Consumer,
-        **_: Any,
-    ) -> None:
-        self.total_failed.add(
-            1,
-            {
-                "service": self.service.name,
-                "consumer": consumer.name,
-            },
-        )
-
-    async def after_retry_message(
-        self,
-        *,
-        consumer: Consumer,
-        **_: Any,
-    ) -> None:
-        self.total_retried.add(
-            1,
-            {
-                "service": self.service.name,
-                "consumer": consumer.name,
-            },
+    def _observe_duration(self, consumer: str, elapsed: float) -> None:
+        self.message_durations.record(
+            elapsed, {"service": self.service.name, "consumer": consumer}
         )

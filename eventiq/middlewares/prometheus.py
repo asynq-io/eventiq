@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from eventiq.middleware import Middleware
-
-if TYPE_CHECKING:
-    from eventiq import Consumer, Service
-    from eventiq.exceptions import Retry
-
 from prometheus_client import (
     CollectorRegistry,
     Counter,
@@ -15,6 +9,11 @@ from prometheus_client import (
     Histogram,
     start_http_server,
 )
+
+from .metrics import MetricsMiddleware
+
+if TYPE_CHECKING:
+    from eventiq import Service
 
 DEFAULT_BUCKETS = (
     5,
@@ -39,7 +38,7 @@ DEFAULT_BUCKETS = (
 )
 
 
-class PrometheusMiddleware(Middleware):
+class PrometheusMiddleware(MetricsMiddleware):
     def __init__(
         self,
         service: Service,
@@ -51,16 +50,14 @@ class PrometheusMiddleware(Middleware):
         server_port: int = 8888,
         **http_server_options: Any,
     ) -> None:
-        super().__init__(service)
+        super().__init__(service, prefix=prefix)
         if registry is None:
             from prometheus_client import REGISTRY
 
             registry = REGISTRY
         self.registry = registry
         self.run_server = run_server
-        self.buckets = buckets
         self.server_port = server_port
-        self.prefix = prefix
         self.http_server_options = http_server_options
 
         self.in_progress = Gauge(
@@ -110,61 +107,30 @@ class PrometheusMiddleware(Middleware):
             "Time spend processing message",
             ["service", "consumer"],
             registry=self.registry,
-            buckets=self.buckets,
+            buckets=buckets,
         )
+        # metric name (as used by MetricsMiddleware's hooks) -> counter, for the
+        # ones that follow the plain "service, consumer" label shape.
+        self._counters: dict[str, Counter] = {
+            "total": self.total_messages,
+            "skipped": self.total_skipped_messages,
+            "retried": self.total_retried_messages,
+            "errored": self.total_errored_messages,
+            "failed": self.total_failed_messages,
+        }
 
-    def format(self, value: str) -> str:
-        return f"{self.prefix}_{value}" if self.prefix else value
+    def _inc(self, metric: str, consumer: str | None = None, value: int = 1) -> None:
+        if metric == "in_progress":
+            self.in_progress.labels(self.service.name, consumer).inc(value)
+        elif metric == "published":
+            self.total_messages_published.labels(self.service.name).inc(value)
+        else:
+            self._counters[metric].labels(self.service.name, consumer).inc(value)
 
-    async def before_process_message(self, *, consumer: Consumer, **_: Any) -> None:
-        labels = (self.service.name, consumer.name)
-        self.in_progress.labels(*labels).inc()
-
-    async def after_message_finalized(
-        self,
-        *,
-        consumer: Consumer,
-        elapsed: float = 0.0,
-        **_: Any,
-    ) -> None:
-        labels = (self.service.name, consumer.name)
-        self.in_progress.labels(*labels).dec()
-        self.total_messages.labels(*labels).inc()
-        self.message_durations.labels(*labels).observe(elapsed * 1000)
-
-    async def after_retry_message(
-        self,
-        *,
-        consumer: Consumer,
-        exc: Retry,
-        **_: Any,
-    ) -> None:
-        labels = (self.service.name, consumer.name)
-        self.total_retried_messages.labels(*labels).inc()
-        if exc.__cause__ is not None:
-            self.total_errored_messages.labels(*labels).inc()
-
-    async def after_skip_message(
-        self,
-        *,
-        consumer: Consumer,
-        **_: Any,
-    ) -> None:
-        labels = (self.service.name, consumer.name)
-        self.total_skipped_messages.labels(*labels).inc()
-
-    async def after_fail_message(
-        self,
-        *,
-        consumer: Consumer,
-        **_: Any,
-    ) -> None:
-        labels = (self.service.name, consumer.name)
-        self.total_failed_messages.labels(*labels).inc()
-
-    async def after_publish(self, **_: Any) -> None:
-        labels = (self.service.name,)
-        self.total_messages_published.labels(*labels).inc()
+    def _observe_duration(self, consumer: str, elapsed: float) -> None:
+        self.message_durations.labels(self.service.name, consumer).observe(
+            elapsed * 1000
+        )
 
     async def before_broker_connect(self) -> None:
         if self.run_server:
